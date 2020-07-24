@@ -1,0 +1,100 @@
+---
+title: "HW 1"
+author: "Shiloh Bradley"
+date: "6/9/2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+# Part A
+```{r setup}
+library(ggplot2)
+library(gridExtra)
+
+setwd("~/Desktop/Personal Computer/MBA/HOA 732/")
+```
+
+```{r Read in Data}
+D <- read.csv("Diamonds.csv")
+head(D)
+```
+
+```{r Make some plots}
+B1 <- ggplot(D, aes(y = Weight)) + 
+      geom_boxplot()
+H1 <- ggplot(D, aes(y = Weight)) + 
+      geom_histogram(bins = 8) + 
+      coord_flip()
+B2 <- ggplot(D, aes(y = Price)) + 
+      geom_bar()
+H2 <- ggplot(D, aes(y = Price)) + 
+      geom_histogram(bins=8) + 
+      coord_flip()
+```
+
+```{r Join plots together into one diagram}
+grid.arrange(B1, H1, B2, H2, ncol = 2, top = "Box plots and histograms for Diamonds data set")
+```
+
+```{r}
+tapply(D$Weight, D$Clarity, summary)
+tapply(D$Weight, D$Cert_Body, summary)
+tapply(D$Weight, D$Clarity, summary)
+tapply(D$Weight, list(D$Clarity, D$Cert_Body), mean)
+tapply(D$Weight, list(D$Clarity, D$Cert_Body), sd)
+```
+
+```{r}
+ggplot(D, aes(x = Weight, y = Price)) +
+  geom_point()
+```
+
+```{r}
+ggplot(D, aes(x = Weight, y = Price, color = Clarity)) + 
+  geom_point()
+```
+
+```{r}
+ggplot(D, aes(x = Weight, y = Price, color = Cert_Body)) + 
+  geom_point()
+```
+
+# Part B
+```{r 1b Box plot and Histogram of Teller Time}
+D <- read.csv("teller time.csv", header=TRUE)
+BX2 <- ggplot(D,aes(x=1,y=time)) + geom_boxplot()+
+stat_summary(fun.y = "mean", geom="point",color="blue")
+HISD2 <- ggplot(data=D, aes(time)) + geom_histogram(breaks=seq(8, 20, by = 2), 
+                 col="red", 
+                 fill="blue", 
+                 alpha = .2)+
+                 labs(title="Dime") +
+                  labs(x="Line 2", y="Count") 
+
+grid.arrange(BX2,HISD2,ncol=1, nrow =2)
+```
+
+```{r 1b_i data_summary and 1-sample t-test}
+summary(D)
+
+#Test h0:mu=10, H1:mu > 10
+t.test(D$time,mu=10, alternative = "greater" ) 
+```
+
+```{r 1b_i verification of normality of teller time sample}
+#qq plot with normal line (normality test)
+ggplot(D)+stat_qq(aes(sample=time)) + 
+  geom_qq_line(aes(sample=time))+
+  geom_text(aes(x=0.5, y=10, color="red", label="Shapiro-test p-value = 0.6543"))+
+  theme(legend.position="none")
+shapiro.test(D$time)
+```
+
+```{r 1b_ii Test for single proportion}
+x <- sum(D$time > 10)
+n <- nrow(D)
+#test if p > 0.80
+prop.test(x, n, .80, alternative = "greater")          # continuity correction DRUE by default
+```

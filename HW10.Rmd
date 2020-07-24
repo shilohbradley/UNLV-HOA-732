@@ -1,0 +1,370 @@
+---
+title: "Homework 10 - Boosting Methods"
+author: "Shiloh Bradley"
+date: "7/1/2020"
+output: pdf_document
+---
+
+```{r}
+source("normalize.R")
+source("RMSE.R")
+
+library(dummies)
+library(gbm)
+library(ggplot2)
+library(xgboost)
+```
+
+## Charles Book Club data
+```{r read CBC data}
+df <- read.csv("Charles_BookClub.csv")
+dim(df) ## 2000   18
+names(df)
+head(df)
+summary(df)
+```
+
+```{r}
+predictors.cat <- c("Gender", "ChildBks", "YouthBks", "CookBks", "DoltYBks", "RefBks", "ArtBks", "GeogBks", "ItalCook", "ItalHAtlas", "ItalArt", "Florence")    
+predictors.con <- c("Seq.", "ID.", "M", "R", "F", "FirstPurch")
+df.cat <- df[predictors.cat]
+df.con <- df[predictors.con]
+```
+
+```{r normalize continuous predictors CBC}
+df.Z <- apply(df[predictors.con], 2, normalize)
+summary(df.Z)
+```
+
+```{r dummy code categorical predictors CBC}
+df.cat <- dummy.data.frame(df.cat, sep = ".")
+head(df.cat)
+df <- cbind.data.frame(df$Florence, df.cat, df.Z)
+colnames(df)[1] <- "Florence"
+head(df)
+```
+
+```{r split CBC data}
+M <- trunc(.25 * nrow(df)) 
+
+# to be able to replicate the results, set initial seed for random 
+# number generator
+set.seed(1797317)
+holdout <- sample(1:nrow(df), M, replace = F)
+df.train <- df[-holdout, ]   
+df.test <- df[holdout, ]    
+dim(df.train)
+dim(df.test)
+```
+
+```{r create formula of CBC data}
+features0 <- setdiff(names(df), c("Florence"))
+Formula0 <- formula(paste("Florence ~ ", 
+                          paste(features0, collapse = " + ")))
+Formula0
+```
+
+```{r}
+gbm1 <- gbm(
+  Formula0,
+  data = df.train,
+  distribution = "gaussian",
+  n.trees = 10000,
+  shrinkage = 0.001,
+  interaction.depth = 4,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )  
+# print results
+print(gbm1)
+smreGB1 <- summary(gbm1)
+str(smreGB1)
+names(smreGB1)
+```
+
+```{r}
+inf.sort <- smreGB1[order(smreGB1[ ,"rel.inf"]), , drop = FALSE]
+#write.csv(VIrf1.sort,"VIrf1 120118.csv")
+inf.sort$X <- rownames(inf.sort)
+inf.sort$X <- factor(inf.sort$X, levels = inf.sort$X)
+
+# Influence Plot in ggplot2
+ggplot(inf.sort, aes(x = X, y = rel.inf)) +
+    geom_bar(stat = "identity", position = "dodge", fill = "lightblue") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    ylab("Mean Decrease in Gini Index") + 
+    xlab("Predictor") +
+    ggtitle("Variable Influence Plot for Gradient Boosting")
+```
+
+```{r performance measures for train and test sets, gradient boosting model CBC}
+Y.train <- df.train$Florence
+Y.test <- df.test$Florence
+Yhat.train_gbm <- gbm1$fit
+Yhat.test_gbm <- predict(gbm1, n.trees = gbm1$n.trees, df.test)
+RMSE.train_gbm <- RMSE(Y.train, Yhat.train_gbm)
+RMSE.test_gbm <- RMSE(Y.test, Yhat.test_gbm)
+df.RMSE_gbm <- rbind.data.frame(RMSE.train_gbm, RMSE.test_gbm)
+colnames(df.RMSE_gbm) <- c("gbm.R_Square", "gbm.RMSE")
+rownames(df.RMSE_gbm) <- c("train", "test")
+df.RMSE_gbm
+```
+
+```{r}
+train.y <- df.train$Florence
+test.y <- df.test$Florence
+
+E2.train <- as.matrix(df.train[,-1])
+E2.test <- as.matrix(df.test[,-1])
+
+dTrain <- xgb.DMatrix(data = E2.train, label= train.y)  # this specifies response is Train.Y
+dTest <- xgb.DMatrix(data = E2.test, label= test.y)  # this specifies response is Test.Y
+```
+
+```{r tune the xgboost model CBc}
+set.seed(311317)
+searchGridSubCol <- expand.grid(subsample = c(0.5, 0.6), 
+                                colsample_bytree = c(0.5, 0.6),
+                                max_depth = c(3, 4),
+                                min_child = seq(1), 
+                                eta = c(0.1)
+)
+```
+
+```{r tune the xgboost model CBC}
+set.seed(11317)
+searchGridSubCol <- expand.grid(subsample = c(0.5, 0.6), 
+                                colsample_bytree = c(0.5, 0.6),
+                                max_depth = c(3, 4),
+                                min_child = seq(1), 
+                                eta = c(0.1)
+)
+ntrees <- 50
+
+system.time(
+rmseErrorsHyperparameters <- apply(searchGridSubCol, 1, function(parameterList) {
+  
+  #Extract Parameters to test
+  currentSubsampleRate <- parameterList[["subsample"]]
+  currentColsampleRate <- parameterList[["colsample_bytree"]]
+  currentDepth <- parameterList[["max_depth"]]
+  currentEta <- parameterList[["eta"]]
+  currentMinChild <- parameterList[["min_child"]]
+  xgboostModelCV <- xgb.cv(data =  dTrain, nrounds = ntrees, nfold = 5, showsd = TRUE, 
+                       metrics = "rmse", verbose = TRUE, "eval_metric" = "rmse",
+                     "objective" = "reg:linear", "max.depth" = currentDepth, "eta" = currentEta,                               
+                     "subsample" = currentSubsampleRate, "colsample_bytree" = currentColsampleRate, 
+                     print_every_n = 10, "min_child_weight" = currentMinChild, booster = "gbtree",
+                     early_stopping_rounds = 10)
+  
+  xvalidationScores <- as.data.frame(xgboostModelCV$evaluation_log)
+  rmse <- tail(xvalidationScores$test_rmse_mean, 1)
+  trmse <- tail(xvalidationScores$train_rmse_mean,1)
+  output <- return(c(rmse, trmse, currentSubsampleRate, currentColsampleRate, currentDepth, currentEta, currentMinChild))}))
+
+output <- as.data.frame(t(rmseErrorsHyperparameters))
+varnames <- c("TestRMSE", "TrainRMSE", "SubSampRate", "ColSampRate", "Depth", "eta", "currentMinChild")
+names(output) <- varnames
+output # ntree = 50
+```
+
+```{r}
+#Final xgboost model
+set.seed(11371)
+ntree <- 50
+xgbF <- xgboost(data = dTrain, # the data   
+                 nround = 100, # max number of boosting iterations
+                 SubSampRate = 0.6, 
+                 ColSampRate = 0.6,
+                 Depth = 4,
+                 eta = 0.1,
+                 currentMinChild = 1,
+                 objective = "reg:linear")  # the objective function
+```
+
+```{r predict using final xgboost model xgbF CBC}
+pred.train_xgb <- predict(xgbF, dTrain)
+pred.test_xgb <- predict(xgbF, dTest)
+#RMSE <- function(Y,Yhat)
+RMSR.train_xgb <- RMSE(train.y,pred.train_xgb)
+RMSR.test_xgb <- RMSE(test.y,pred.test_xgb)
+RMSR.train_xgb
+RMSR.test_xgb
+```
+
+## Boston Housing Data
+```{r read Boston data}
+df <- read.csv("Boston Housing.csv")
+dim(df) ## 506  15
+names(df)
+head(df)
+summary(df)
+```
+
+```{r}
+# predictors.cat <- c("Gender", "ChildBks", "YouthBks", "CookBks", "DoltYBks", "RefBks", "ArtBks", "GeogBks", "ItalCook", "ItalHAtlas", "ItalArt", "Florence")    
+# predictors.con <- c("Seq.", "ID.", "M", "R", "F", "FirstPurch")
+# df.cat <- df[predictors.cat]
+# df.con <- df[predictors.con]
+```
+
+```{r normalize continuous predictors BH}
+df.Z <- apply(df, 2, normalize)
+summary(df.Z)
+```
+
+```{r dummy code categorical predictors BH}
+# df.cat <- dummy.data.frame(df.cat, sep = ".")
+# head(df.cat)
+df <- cbind.data.frame(df$medv, df.Z)
+colnames(df)[1] <- "medv"
+head(df)
+```
+
+```{r split BH data}
+M <- trunc(.25 * nrow(df)) 
+
+# to be able to replicate the results, set initial seed for random 
+# number generator
+set.seed(1797317)
+holdout <- sample(1:nrow(df), M, replace = F)
+df.train <- df[-holdout, ]   
+df.test <- df[holdout, ]    
+dim(df.train)
+dim(df.test)
+```
+
+```{r create formula of BH data}
+features0 <- setdiff(names(df), c("medv"))
+Formula0 <- formula(paste("medv ~ ", 
+                          paste(features0, collapse = " + ")))
+Formula0
+```
+
+```{r}
+gbm1 <- gbm(
+  Formula0,
+  data = df.train,
+  distribution = "gaussian",
+  n.trees = 10000,
+  shrinkage = 0.001,
+  interaction.depth = 4,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )  
+# print results
+print(gbm1)
+smreGB1 <- summary(gbm1)
+str(smreGB1)
+names(smreGB1)
+```
+
+```{r}
+inf.sort <- smreGB1[order(smreGB1[,"rel.inf"]), , drop = FALSE]
+#write.csv(VIrf1.sort,"VIrf1 120118.csv")
+inf.sort$X <- rownames(inf.sort)
+inf.sort$X <- factor(inf.sort$X, levels = inf.sort$X)
+
+# Influence Plot in ggplot2
+ggplot(inf.sort, aes(x = X, y = rel.inf)) +
+    geom_bar(stat = "identity", position = "dodge", fill = "lightblue") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    ylab("Mean Decrease in Gini Index") + 
+    xlab("Predictor") +
+    ggtitle("Variable Influence Plot for Gradient Boosting")
+```
+
+```{r performance measures for train and test sets, gradient boosting model BH}
+Y.train <- df.train$medv
+Y.test <- df.test$medv
+Yhat.train_gbm <- gbm1$fit
+Yhat.test_gbm <- predict(gbm1, n.trees = gbm1$n.trees, df.test)
+RMSE.train_gbm <- RMSE(Y.train, Yhat.train_gbm)
+RMSE.test_gbm <- RMSE(Y.test, Yhat.test_gbm)
+df.RMSE_gbm <- rbind.data.frame(RMSE.train_gbm, RMSE.test_gbm)
+colnames(df.RMSE_gbm) <- c("gbm.R_Square", "gbm.RMSE")
+rownames(df.RMSE_gbm) <- c("train", "test")
+df.RMSE_gbm
+```
+
+```{r}
+train.y <- df.train$medv
+test.y <- df.test$medv
+
+E2.train <- as.matrix(df.train[,-1])
+E2.test <- as.matrix(df.test[,-1])
+
+dTrain <- xgb.DMatrix(data = E2.train, label = train.y)  # this specifies response is Train.Y
+dTest <- xgb.DMatrix(data = E2.test, label = test.y)  # this specifies response is Test.Y
+```
+
+```{r tune the xgboost model BH}
+set.seed(311317)
+searchGridSubCol <- expand.grid(subsample = c(0.5, 0.6), 
+                                colsample_bytree = c(0.5, 0.6),
+                                max_depth = c(3, 4),
+                                min_child = seq(1), 
+                                eta = c(0.1)
+)
+```
+
+```{r tune the xgboost model 2 BH}
+set.seed(11317)
+searchGridSubCol <- expand.grid(subsample = c(0.5, 0.6), 
+                                colsample_bytree = c(0.5, 0.6),
+                                max_depth = c(3, 4),
+                                min_child = seq(1), 
+                                eta = c(0.1)
+)
+ntrees <- 50
+
+system.time(
+rmseErrorsHyperparameters <- apply(searchGridSubCol, 1, function(parameterList) {
+  
+  #Extract Parameters to test
+  currentSubsampleRate <- parameterList[["subsample"]]
+  currentColsampleRate <- parameterList[["colsample_bytree"]]
+  currentDepth <- parameterList[["max_depth"]]
+  currentEta <- parameterList[["eta"]]
+  currentMinChild <- parameterList[["min_child"]]
+  xgboostModelCV <- xgb.cv(data =  dTrain, nrounds = ntrees, nfold = 5, showsd = TRUE, 
+                       metrics = "rmse", verbose = TRUE, "eval_metric" = "rmse",
+                     "objective" = "reg:linear", "max.depth" = currentDepth, "eta" = currentEta,                               
+                     "subsample" = currentSubsampleRate, "colsample_bytree" = currentColsampleRate, 
+                     print_every_n = 10, "min_child_weight" = currentMinChild, booster = "gbtree",
+                     early_stopping_rounds = 10)
+  
+  xvalidationScores <- as.data.frame(xgboostModelCV$evaluation_log)
+  rmse <- tail(xvalidationScores$test_rmse_mean, 1)
+  trmse <- tail(xvalidationScores$train_rmse_mean,1)
+  output <- return(c(rmse, trmse, currentSubsampleRate, currentColsampleRate, currentDepth, currentEta, currentMinChild))}))
+
+output <- as.data.frame(t(rmseErrorsHyperparameters))
+varnames <- c("TestRMSE", "TrainRMSE", "SubSampRate", "ColSampRate", "Depth", "eta", "currentMinChild")
+names(output) <- varnames
+output # ntree = 50
+```
+
+```{r}
+#Final xgboost model
+set.seed(11371)
+ntree <- 50
+xgbF <- xgboost(data = dTrain, # the data   
+                 nround = 100, # max number of boosting iterations
+                 SubSampRate = 0.6, 
+                 ColSampRate = 0.6,
+                 Depth = 4,
+                 eta = 0.1,
+                 currentMinChild = 1,
+                 objective = "reg:linear")  # the objective function
+```
+
+```{r predict using final xgboost model xgbF BH}
+pred.train_xgb <- predict(xgbF, dTrain)
+pred.test_xgb <- predict(xgbF, dTest)
+#RMSE <- function(Y,Yhat)
+RMSR.train_xgb <- RMSE(train.y, pred.train_xgb)
+RMSR.test_xgb <- RMSE(test.y, pred.test_xgb)
+RMSR.train_xgb
+RMSR.test_xgb
+```

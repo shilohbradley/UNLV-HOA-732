@@ -1,0 +1,238 @@
+---
+title: "Homework 7 - Decision Tree"
+author: "Shiloh Bradley"
+date: "6/23/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(car)
+library(ggplot2)
+library(rattle)
+library(rpart)
+library("rpart.plot")
+```
+
+# Toyota Corolla
+```{r}
+df <- read.csv("ToyotaCorolla2.csv")
+head(df)
+summary(df)
+```
+
+```{r split data into training and test sets}
+M <- .25 * nrow(df)
+#to be able to replicate the results, set initial seed for random 
+#number generator
+set.seed(11317)
+holdout <- sample(1:nrow(df), M, replace = F)
+
+df.train <- df[-holdout, ]   # Training set
+df.test <- df[holdout, ]    # Test set
+dim(df.train) #  1077 11
+dim(df.test)  #  359 11
+```
+
+```{r}
+lm1 <- lm(Price ~ ., 
+          data = df.train)
+summary(lm1)
+vif(lm1)
+```
+## There aren't any variables with VIF greater than 5, so we don't need to worry about those.
+## We will just worry about dropping insignificant values instead.
+``` {r}
+lm2 <- lm(Price ~ . -Met_Color -cc -Doors, data = df.train)
+summary(lm2)
+vif(lm2)
+```
+
+``` {r lm2 is the final lm model}
+lmF <- lm2
+```
+
+```{r predict test set using lmF and calculate residuals}
+pred.lmF_test <- predict(lmF, df.test)
+reslmF_test <- df.test$Price - pred.lmF_test
+```
+
+```{r MSE and RMSE of the lmF model - training and test sets}
+R_train <- cor(df.train$Price, lmF$fitted.values)
+R_train2 <- R_train**2
+MSE.lmF_train <- sum(lmF$residuals**2)/nrow(df.train)
+RMSE.lmF_train <- sqrt(MSE.lmF_train)
+
+R_test <- cor(df.test$Price, pred.lmF_test)
+R_test2 <- R_test**2
+MSE.lmF_test <- sum(reslmF_test**2)/nrow(df.test)
+RMSE.lmF_test <- sqrt(MSE.lmF_test)
+```
+
+```{r assemble dataframe of R-square and MSE of lmF for training and test sets}
+RMSE <- c(RMSE.lmF_train, RMSE.lmF_test)
+R2 <- c(R_train2, R_test2) 
+df.lmF <- rbind.data.frame(RMSE, R2)
+colnames(df.lmF) <- c("training", "test")
+rownames(df.lmF) <- c("RMSE.LM", "R_Square.LM")
+df.lmF
+```
+
+```{r fit decision tree model}
+fit <- rpart(Price ~ . -Met_Color -cc -Doors, data = df.train, method = "anova")
+rpart.plot(fit)
+```
+
+```{r fancy plot}
+fancyRpartPlot(fit) 
+```
+
+```{r RMSE and RSquare from decision tree}
+pred.train_dt <- predict(fit, newdata = df.train)
+pred.test_dt <- predict(fit, newdata = df.test)
+MSE.train_dt <- sum((pred.train_dt - df.train$Price)**2)/nrow(df.train)
+RMSE.train_dt <- sqrt(MSE.train_dt)
+MSE.test_dt <- sum((pred.test_dt - df.test$Price)**2)/nrow(df.test)
+RMSE.test_dt <- sqrt(MSE.test_dt)
+
+r.train_dt <- cor(df.train$Price, pred.train_dt)
+
+RMSE_dt <- c(RMSE.train_dt, RMSE.test_dt)
+
+r.test_dt <- cor(df.test$Price, pred.test_dt)
+r_dt <- c(r.train_dt, r.test_dt)
+r2_dt <- r_dt**2
+
+df.dt <- rbind.data.frame(RMSE_dt, r2_dt)
+colnames(df.dt) <- c("training","test")
+rownames(df.dt) <- c("RMSE.DT","R_Square.DT")
+round(df.dt,2)
+```
+
+```{r}
+df.train <- cbind.data.frame(df.train$Price, lmF$fitted.values, pred.train_dt)
+colnames(df.train) <- c("Price_obs", "Price_lm.pred", "Price_dt.pred")
+df.test <- cbind.data.frame(df.test$Price, pred.lmF_test, pred.test_dt)
+colnames(df.test) <- c("Price_obs", "Price_lm.pred", "Price_dt.pred")
+
+p.train1 <- ggplot(df.train, aes(x = Price_obs)) + 
+  geom_point(aes(y = Price_lm.pred), color = "red") + 
+  geom_point(aes(y = Price_dt.pred), color = "steelblue") +
+  xlab("Observed Median Value") + 
+  ylab("Predicted Median Value\nDecision Tree=blue, LM = red")
+
+p.train1
+```
+
+# Charles Book Club
+```{r read Charles Book Club data}
+df <- read.csv("Charles_BookClub.csv", header = TRUE)
+```
+
+```{r}
+M <- .25 * nrow(df)
+#to be able to replicate the results, set initial seed for random 
+#number generator
+set.seed(11317)
+holdout <- sample(1:nrow(df), M, replace = F)
+
+df.train <- df[-holdout, ]   # Training set
+df.test <- df[holdout, ]    # Test set
+dim(df.train) #  1500 18
+dim(df.test)  #  500 18
+```
+
+```{r}
+lm1 <- lm(Florence ~ ., 
+          data = df.train)
+# summary(lm1)
+vif(lm1)
+```
+
+## Remove variables with VIF greater than 5.
+```{r}
+lm2 <- lm(Florence ~ . -Seq. -ID. -FirstPurch, data = df.train)
+summary(lm2)
+vif(lm2)
+```
+
+## Remove insignificant variables.
+```{r}
+lmF <- lm(Florence ~ . -Seq. -ID. -FirstPurch -M -RefBks -GeogBks -ItalCook -ItalHAtlas -ItalArt, data = df.train)
+summary(lmF)
+vif(lmF)
+```
+
+```{r}
+pred.lmF_test <- predict(lmF, df.test)
+reslmF_test <- df.test$Florence - pred.lmF_test
+```
+
+```{r}
+R_train <- cor(df.train$Florence, lmF$fitted.values)
+R_train2 <- R_train**2
+MSE.lmF_train <- sum(lmF$residuals**2)/nrow(df.train)
+RMSE.lmF_train <- sqrt(MSE.lmF_train)
+
+R_test <- cor(df.test$Florence, pred.lmF_test)
+R_test2 <- R_test**2
+MSE.lmF_test <- sum(reslmF_test**2)/nrow(df.test)
+RMSE.lmF_test <- sqrt(MSE.lmF_test)
+```
+
+```{r}
+RMSE <- c(RMSE.lmF_train, RMSE.lmF_test)
+R2 <- c(R_train2, R_test2) 
+df.lmF <- rbind.data.frame(RMSE, R2)
+colnames(df.lmF) <- c("training", "test")
+rownames(df.lmF) <- c("RMSE.LM", "R_Square.LM")
+df.lmF
+```
+
+```{r}
+fit <- rpart(Florence ~ . -Seq. -ID. -FirstPurch -M -RefBks -GeogBks -ItalCook -ItalHAtlas -ItalArt, 
+             data = df.train, method = "anova")
+rpart.plot(fit)
+```
+
+```{r}
+fancyRpartPlot(fit) 
+```
+
+```{r}
+pred.train_dt <- predict(fit, newdata = df.train)
+pred.test_dt <- predict(fit, newdata = df.test)
+MSE.train_dt <- sum((pred.train_dt - df.train$Florence)**2)/nrow(df.train)
+RMSE.train_dt <- sqrt(MSE.train_dt)
+MSE.test_dt <- sum((pred.test_dt - df.test$Florence)**2)/nrow(df.test)
+RMSE.test_dt <- sqrt(MSE.test_dt)
+
+r.train_dt <- cor(df.train$Florence, pred.train_dt)
+
+RMSE_dt <- c(RMSE.train_dt, RMSE.test_dt)
+
+r.test_dt <- cor(df.test$Florence, pred.test_dt)
+r_dt <- c(r.train_dt, r.test_dt)
+r2_dt <- r_dt**2
+
+df.dt <- rbind.data.frame(RMSE_dt, r2_dt)
+colnames(df.dt) <- c("training","test")
+rownames(df.dt) <- c("RMSE.DT","R_Square.DT")
+round(df.dt,2)
+```
+
+```{r}
+df.train <- cbind.data.frame(df.train$Florence, lmF$fitted.values, pred.train_dt)
+colnames(df.train) <- c("Florence_obs", "Florence_lm.pred", "Florence_dt.pred")
+df.test <- cbind.data.frame(df.test$Florence, pred.lmF_test, pred.test_dt)
+colnames(df.test) <- c("Florence_obs", "Florence_lm.pred", "Florence_dt.pred")
+
+p.train1 <- ggplot(df.train, aes(x = Florence_obs)) + 
+  geom_point(aes(y = Florence_lm.pred), color = "red") + 
+  geom_point(aes(y = Florence_dt.pred), color = "steelblue") +
+  xlab("Observed Median Value") + 
+  ylab("Predicted Median Value\nDecision Tree=blue, LM = red")
+
+p.train1
+```

@@ -1,0 +1,131 @@
+---
+title: "HW5 - Logistic Regression and Multiple Linear Regression"
+author: "Shiloh Bradley"
+date: "6/10/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(gridExtra)
+
+setwd("~/Desktop/Personal Computer/MBA/HOA 732/")
+```
+
+```{r read Toyota Corolla data}
+C <- read.csv("rhop95.csv", header=TRUE)
+dim(C)
+head(C)
+```
+
+```{r}
+summary(C)
+```
+
+```{r fit MLR model}
+lm1 <- lm(Y~X1+X2+X3+X4,data=C)
+smre1 <- summary(lm1)
+smre1
+library(car)
+vif(lm1) # all VIFs < 2
+```
+
+```{r verify normality of residuals from final MLR model lm1}
+shapiro.test(lm1$residuals)
+df.resid <- as.data.frame(lm1$residuals)
+colnames(df.resid) <- "Residuals"
+#qq plot with normal line (normality test for residuals from lm2)
+ggplot(df.resid)+stat_qq(aes(sample=Residuals)) + 
+  geom_qq_line(aes(sample=Residuals))+
+  geom_text(aes(x=0.5, y=-10, color="red", label="Shapiro-test p-value = 0.000"))+
+  theme(legend.position="none")+
+  ggtitle("Normality test for residuals from the final MLR Model rhop95")
+```
+
+Root Mean Square Error (RMSE)
+```{r}
+MSE <- sum(lm1$residuals ** 2) / nrow(C)
+MSE
+RMSE <- sqrt(MSE)
+RMSE
+```
+
+```{r bootstrap MLR}
+#Since residuals are not normally distributed, we can use bootstrap to confirm the p-values
+#There are three different types of bootstrapping:
+
+#(1)Parametric boootstrap simulate as follows:
+#yi = b0 + b1*X1i + ,,, + bP*XPi + ei,  ei generated from N(0,sd), bi = estimated bet_i,  sd = sd of residuals
+
+#(2)Resampling residuals in regression problems assumes that the model is right, but doesn’t
+#make any assumptions its distribution. So the confidence intervals should be safer (more 
+#conservative) than parametric bootstrap.
+
+#(3)Resampling cases or observations in regression problems assumes even less - it just assumes that 
+#obsevations are independent.  So the confidence intervals should be even safer (more 
+#conservative) than residual bootstrap.
+
+#parametric bootstrap is typically not used.
+# 
+#Bootstrap observations or cases
+
+beta <- c(smre2$coefficients[1,1],smre2$coefficients[2,1],smre2$coefficients[3,1],
+          smre2$coefficients[4,1],smre2$coefficients[5,1],smre2$coefficients[6,1],
+          smre2$coefficients[7,1],smre2$coefficients[8,1])
+
+B <- 1000
+beta.Boot <- matrix(NA,nrow=B,ncol=length(beta))
+
+n <- nrow(C) # 1436
+for (i in 1:B)
+{
+boot.I <- sample(1:n, replace=TRUE)
+boot.C <- C[boot.I,]
+lm2.B <- lm(Price~Age+KM+Fuel_Type+HP+Quarterly_Tax+Weight,data=boot.C)
+smre2.B <- summary(lm2.B)
+beta.Boot[i,] <- c(smre2.B$coefficients[1,1],smre2.B$coefficients[2,1],smre2.B$coefficients[3,1],
+          smre2.B$coefficients[4,1],smre2.B$coefficients[5,1],smre2.B$coefficients[6,1],
+          smre2.B$coefficients[7,1],smre2.B$coefficients[8,1])
+}
+beta.Boot <- as.data.frame(beta.Boot)
+colnames(beta.Boot) <- c("beta0","Age","KM","Fuel_TypeDiesel","Fuel_TypePetrol","HP","Quarterly_Tax","Weight")
+head(beta.Boot)
+
+
+Q025_975 <- function(x) quantile(x,  probs = c(0.025, 0.975))
+
+CI95_boot <- apply(beta.Boot,2,Q025_975)
+write.csv(CI95_boot,"Toyota Corolla MLR bootstrap CI.csv")
+
+#alternately, we can run approximate t-test (z-test) using sd(beta_hat) from bootstrap
+sd.Boot <- apply(beta.Boot,2,sd)
+t.boot <- beta/sd.Boot
+p.value <- 2*pnorm(-abs(t.boot))
+p.value <- round(p.value,4)
+```
+
+```{r Bootstrap residuals}
+resid <- lm2$residuals
+yhat <- lm2$fitted
+B <- 1000
+beta.Boot2 <- matrix(NA,nrow=B,ncol=length(beta))
+
+for (i in 1:B)
+{
+boot.I <- sample(1:n, replace=TRUE)
+boot.resid<- resid[boot.I]
+boot.Price <- yhat + boot.resid
+lm2.B <- lm(boot.Price~Age+KM+Fuel_Type+HP+Quarterly_Tax+Weight,data=C)
+smre2.B <- summary(lm2.B)
+beta.Boot2[i,] <- c(smre2.B$coefficients[1,1],smre2.B$coefficients[2,1],smre2.B$coefficients[3,1],
+          smre2.B$coefficients[4,1],smre2.B$coefficients[5,1],smre2.B$coefficients[6,1],
+          smre2.B$coefficients[7,1],smre2.B$coefficients[8,1])
+}
+beta.Boot2 <- as.data.frame(beta.Boot2)
+colnames(beta.Boot2) <- c("beta0","Age","KM","Fuel_TypeDiesel","Fuel_TypePetrol","HP","Quarterly_Tax","Weight")
+
+CI95.boot2 <- apply(beta.Boot2,2,Q025_975)
+write.csv(CI95.boot2,"Toyota Corolla MLR bootstrap residuals CI.csv")
+```

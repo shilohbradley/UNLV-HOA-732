@@ -1,0 +1,141 @@
+---
+title: "HW5 - Logistic Regression and Multiple Linear Regression"
+author: "Shiloh Bradley"
+date: "6/10/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(gridExtra)
+
+setwd("~/Desktop/Personal Computer/MBA/HOA 732/")
+```
+
+# Toyota Corolla data
+```{r read Toyota Corolla data}
+C <- read.csv("ToyotaCorolla2.csv", header=TRUE)
+dim(C)  # 1436   11
+head(C)
+C$Doors <- factor(C$Doors)
+```
+```{r}
+summary(C)
+```
+## Fit MLR Model
+```{r fit MLR model}
+lm1 <- lm(Price~Age+KM+Fuel_Type+HP+Met_Color+Automatic+cc+Doors+Quarterly_Tax+Weight,data=C)
+smre1 <- summary(lm1)
+smre1
+library(car)
+vif(lm1) # all VIFs < 2
+```
+## Drop insignificant predictors, P-value > 0.05
+```{r drop insignificant predictors, P-value > 0.05}
+lm2 <- lm(Price~Age+KM+Fuel_Type+HP+Quarterly_Tax+Weight,data=C) ## Our final model -- explanatory
+smre2 <- summary(lm2)
+smre2
+vif(lm2) # all VIFs < 2
+write.csv(smre2$coefficients,"MLR Final Model Toyota Corolla Price Dataset 052920.csv")
+```
+## Verify normality of residuals from final MLR model lm2
+```{r verify normality of residuals from final MLR model lm2}
+shapiro.test(lm2$residuals)
+df.resid <- as.data.frame(lm2$residuals)
+colnames(df.resid) <- "Residuals"
+#qq plot with normal line (normality test for residuals from lm2)
+ggplot(df.resid)+stat_qq(aes(sample=Residuals)) + 
+  geom_qq_line(aes(sample=Residuals))+
+  geom_text(aes(x=0.5, y=-4000, color="red", label="Shapiro-test p-value = 0.000"))+
+  theme(legend.position="none")+ggtitle("Normality test for residuals from the final MLR Model\nToyota Corolla Price Dataset")
+```
+
+## Root Mean Square Error (RMSE)
+```{r}
+MSE <- sum(lm2$residuals ** 2) / nrow(C)
+MSE
+RMSE <- sqrt(MSE)
+RMSE
+```
+
+# Rhop50
+```{r read rhop50 data}
+C <- read.csv("rhop50.csv", header=TRUE)
+dim(C)
+head(C)
+```
+
+```{r}
+summary(C)
+```
+## Fit MLR Model
+```{r}
+lm1 <- lm(Y~X1+X2+X3+X4,data=C)
+smre1 <- summary(lm1)
+smre1
+library(car)
+vif(lm1) # all VIFs < 2
+```
+
+```{r}
+shapiro.test(lm1$residuals)
+df.resid <- as.data.frame(lm1$residuals)
+colnames(df.resid) <- "Residuals"
+#qq plot with normal line (normality test for residuals from lm2)
+ggplot(df.resid)+stat_qq(aes(sample=Residuals)) + 
+  geom_qq_line(aes(sample=Residuals))+
+  geom_text(aes(x=0.5, y=-10, color="red", label="Shapiro-test p-value = 0.000"))+
+  theme(legend.position="none")+
+  ggtitle("Normality test for residuals from the final MLR Model rhop95")
+```
+
+## Root Mean Square Error (RMSE)
+```{r}
+MSE <- sum(lm1$residuals ** 2) / nrow(C)
+MSE
+RMSE <- sqrt(MSE)
+RMSE
+```
+
+# Rhop 95
+```{r read rhop95 data}
+C <- read.csv("rhop95.csv", header=TRUE)
+dim(C)
+head(C)
+```
+
+```{r}
+summary(C)
+```
+
+## Fit MLR model
+```{r}
+lm1 <- lm(Y~X1+X2+X3+X4,data=C)
+smre1 <- summary(lm1)
+smre1
+library(car)
+vif(lm1) # all VIFs < 2
+```
+
+## Verify normaly of residuals from final MLR model lm1
+```{r}
+shapiro.test(lm1$residuals)
+df.resid <- as.data.frame(lm1$residuals)
+colnames(df.resid) <- "Residuals"
+#qq plot with normal line (normality test for residuals from lm2)
+ggplot(df.resid)+stat_qq(aes(sample=Residuals)) + 
+  geom_qq_line(aes(sample=Residuals))+
+  geom_text(aes(x=0.5, y=-10, color="red", label="Shapiro-test p-value = 0.000"))+
+  theme(legend.position="none")+
+  ggtitle("Normality test for residuals from the final MLR Model rhop95")
+```
+
+## Root Mean Square Error (RMSE)
+```{r}
+MSE <- sum(lm1$residuals ** 2) / nrow(C)
+MSE
+RMSE <- sqrt(MSE)
+RMSE
+```

@@ -1,0 +1,933 @@
+---
+title: "HW6 - Logistic Regression and Multiple Linear Regression"
+author: "Shiloh Bradley"
+date: "6/17/2020"
+output: pdf_document
+---
+```{r setup, echo = FALSE, warning = FALSE}
+setwd("~/Desktop/Personal Computer/MBA/HOA 732/")
+
+library(Amelia)
+library(car)
+library(descr)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(ROCR)
+library(pROC)
+```
+
+```{r function definitions}
+r2fun <- function(m) {
+  u <- LogRegR2(m)
+  data.frame(McFadden = u$RL2, CoxSnell = u$CoxR2, Nagelkerke = u$NagelkerkeR2)
+}
+```
+
+# German Credit
+```{r read German Credit data}
+G <- read.csv("german_credit.csv", header = TRUE)
+```
+
+```{r}
+head(G)
+tail(G)
+dim(G)
+names(G)
+summary(G)
+``` 
+
+```{r data pre-processing}
+## Check for NA's in the data
+sapply(G, function(x) sum(is.na(x)))
+missmap(G, col = c("red", "yellow"), main = "Missingness Map German Credit Data set")
+```
+
+```{r data preprocessing Continued}
+## Checking more information about the variables and seeing what type of variables there are
+table(G$Account.Balance)   
+
+summary(G$Duration.of.Credit..month.)
+#duration.of.Credit..month.  is a continuous predictor
+
+table(G$Payment.Status.of.Previous.Credit) # categorical
+table(G$Purpose)  
+#too many categories, so collapse at high end
+G$Purpose[G$Purpose>=3] <- 4 #   (recoded)
+table(G$Purpose)
+
+summary(G$Credit.Amount)  # - continuous
+table(G$Value.Savings.Stocks)  # - categorical
+table(G$Length.of.current.employment) # - categorical 
+table(G$Instalment.per.cent) # - categorical 
+table(G$Guarantors)  # - categorical
+table(G$Duration.in.Current.address)  # - categorical
+table(G$Most.valuable.available.asse) # - categorical
+summary(G$Age..years.)  # - continuous
+table(G$Concurrent.Credits)  # - categorical
+table(G$Type.of.apartment)  # - categorical
+table(G$No.of.Credits.at.this.Bank)  # - categorical
+table(G$Occupation)  # - categorical
+table(G$No.of.dependents)  # - categorical
+table(G$Telephone)  #  categorical
+table(G$Foreign.Worker) # categorical 
+G$Account.Balance <- factor(G$Account.Balance)
+#Duration.of.Credit..month.  is a continuous predictor
+G$Payment.Status.of.Previous.Credit <- factor(G$Payment.Status.of.Previous.Credit)
+G$Purpose[G$Purpose>=4] <- 4
+G$Purpose <- factor(G$Purpose)
+table(G$Purpose)
+#G$Credit.Amount  - continuous
+G$Value.Savings.Stocks <- factor(G$Value.Savings.Stocks)
+G$Length.of.current.employment <- factor(G$Length.of.current.employment)
+G$Instalment.per.cent <- factor(G$Instalment.per.cent)
+G$Guarantors <- factor(G$Guarantors)
+#table(G$Guarantors) - categorical
+G$Duration.in.Current.address <- factor(G$Duration.in.Current.address)
+G$Most.valuable.available.asset <- factor(G$Most.valuable.available.asset)
+#G$Age..years. - continuous
+G$Concurrent.Credits <- factor(G$Concurrent.Credits)
+G$Type.of.apartment <- factor(G$Type.of.apartment)
+G$No.of.Credits.at.this.Bank <- factor(G$No.of.Credits.at.this.Bank)
+G$Occupation <- factor(G$Occupation)
+G$No.of.dependents <- factor(G$No.of.dependents)
+G$Telephone <- factor(G$Telephone)
+G$Foreign.Worker <- factor(G$Foreign.Worker)
+names(G)
+dim(G) # 1000   21
+```
+
+```{r split data into training and test sets}
+M <- .25 * nrow(G)
+## To be able to replicate the results, 
+## set initial seed for random number generator
+set.seed(117317)
+holdout <- sample(1:nrow(G), M, replace = F)
+
+G.train <- G[-holdout, ] ## Training set 
+G.test <- G[holdout, ] ## Test set
+dim(G.train) ## 1500 18
+dim(G.test) ## 500 18
+
+names(G.train)
+```
+
+```{r Fit logistic regression model to predict purchase of Florence}
+# LR1 <- glm(Florence ~ ., family = binomial("logit"), data = G.train)
+LR1 <- glm(Creditability ~ Account.Balance + Duration.of.Credit..month. + Payment.Status.of.Previous.Credit + 
+                Purpose + Credit.Amount + Value.Savings.Stocks + Length.of.current.employment +      
+                Instalment.per.cent + Sex...Marital.Status + Guarantors + Duration.in.Current.address +  
+                Most.valuable.available.asset + Age..years. + Type.of.apartment,  
+                family = binomial("logit"), data = G.train)
+smre1 <- summary(LR1)
+smre1 ## As long as at least one category of a variable is significant, keep the variable
+      ## Need to keep all the coefficients for a significant categorical variable
+## This comes from the car package
+vif1 <- vif(LR1)
+min(vif1) 
+max(vif1) ## No multicollinearity since the max VIF is 4, which is less than 5
+```
+
+```{r drop insignificant predictors}
+G$Creditability <- factor(G$Creditability)
+## Use this to predict training set and also the test set
+LR2 <- glm(Creditability ~ Account.Balance + Duration.of.Credit..month. + Payment.Status.of.Previous.Credit + 
+                Value.Savings.Stocks + Instalment.per.cent + Sex...Marital.Status + 
+                Most.valuable.available.asset + Type.of.apartment,  
+                family = binomial("logit"), data = G.train)
+
+smre2 <- summary(LR2)
+smre2
+vif2 <- vif(LR2)
+max(vif2) 
+
+# write.csv(smre1$coefficients, "Final LR Model for German Credit Data.csv")
+confint(LR2)
+```
+
+```{r Start prediction}
+##Predict training data using the model LR1
+observed.train <- G.train$Creditability
+predicted.train <- predict(LR2, G.train, type = "response")
+## predict.train consists of P(Y=1) for each observation in the training set
+predicted.train <- round(predicted.train) ## Round to 0 or 1 to get the Y values
+
+## Evaluate Performance of the LR Classifier on the training set
+## Confusion Matrix of observed versus predicted Y values
+CM.train <- table(observed.train, predicted.train)
+CM.train
+```
+
+```{r compute performance measures}
+FP <- CM.train[1,2]/(CM.train[1,1]+CM.train[1,2]) ## false positive
+FN <- CM.train[2,1]/(CM.train[2,1]+CM.train[2,2]) ## false negative
+FP
+FN
+
+## Overall accuracy 
+## Calculated by summing the correct predictions divided by the total of the Confusion Matrix
+OA.train <- sum(diag(CM.train)) / sum(CM.train)
+OA.train
+```
+
+```{r precision and recall}
+## Precision, Recall, F1-Measure are performance measures for binary prediction
+## F1-measure = geometric mean of the Precision and Recall
+
+## Compute Precision, Recall, F1 for Category 1, model LR1
+Recall1 <- CM.train[2,2] / (CM.train[2,1] + CM.train[2,2]) ## diag/row sum
+Precision1 <- CM.train[2,2] / (CM.train[1,2] + CM.train[2,2]) ## diag/column sum
+F1.1 <- 2 / ((1 / Recall1) + (1 / Precision1)) ## The geometric mean
+
+PRF1_train_1 <- (c(Precision1, Recall1, F1.1))
+PRF1_train_1
+
+# Category 0
+## Repeat formulas, but use different positions in the Confusion Matrix
+Recall0 <- CM.train[1,1] / (CM.train[1,1] + CM.train[1,2])
+Precision0 <- CM.train[1,1] / (CM.train[1,1] + CM.train[2,1])
+F1.0 <- 2 / ((1 / Recall0) + (1 / Precision0))
+
+PRF1_train_0 <- c(Precision0, Recall0, F1.0)
+PRF1_train_0
+
+## Why is the LR2 model doing a better job of predicting 1's and so-so job for category 0?
+## Because there are so many more 1's than 0's. This is an example of an unbalanced data set.
+## There are methods for dealing with unbalanced data sets.
+```
+
+```{r compute pseudo-R^2-like measures for logistic regression}
+r2fun(LR1) 
+```
+
+```{r plot ROC curve FPR-TPR curve}
+str(predicted.train) 
+predicted.train <- as.numeric(predicted.train)
+
+pred <- prediction(predicted.train, observed.train)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = TRUE)
+
+#calculate AUC
+roc_obj <- roc(predicted.train, observed.train)
+AUC.train <- auc(roc_obj)
+GINI.train <- 2 * AUC.train - 1
+
+# ROC curve in ggplot2
+DF.PR <- cbind.data.frame(perf@x.values[[1]], perf@y.values[[1]], perf@alpha.values[[1]])
+colnames(DF.PR) <- c("FPR", "TPR", "cutoff")
+
+#to add the 45 degree line to the plot
+x <- c(0, 1)
+y <- c(0, 1)
+df2 <- cbind.data.frame(x, y)
+
+# to add the AUC to the plot
+x1 <- c(0, 1)
+y1 <- c(1, 1)
+df3 <- cbind.data.frame(x1, y1)
+
+pROC.train <- ggplot() + 
+  geom_line(data = DF.PR, aes(x = FPR, y = TPR), color = "darkblue") + 
+  geom_line(data = df2, aes(x = x, y = y), color = "red") + 
+  geom_line(data = df3, aes(x = x1, y = y1), color = "black") + 
+  geom_segment(aes(x = 0, y = 0,xend = 0, yend = 1)) +
+  annotate("text", x = 0.45, y = 0.80, label = "AUC =  0.72") +
+  annotate("text", x = 0.25, y = 0.98, label = "Best AUC = 1") +
+  annotate("text", x = 0.5, y = 0.5, label = "Worst AUC = 0.5") +
+  ggtitle("ROC Plot from Logistic Regression for German Credit Data - Training Set")
+```
+
+```{r KS (Kolomogorov-Smirnov) Statistic}
+## Kolmogorov-Smirnov Statistics (Performance Measure for Binary Classifiers)
+## This is not the same as Kolmogorov-Smirnov Test Statistics for testing normality (of residuals in MLR)
+# KS = maximum(TPR-FPR) 
+
+pK1 <- ggplot() + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = FPR), color = "red") + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = TPR), color = "blue")
+
+DF.PR$diff <- DF.PR$TPR - DF.PR$FPR
+KS.train <- max(DF.PR$diff)
+i.m <- which.max(DF.PR$diff)
+xM <- DF.PR$cutoff[i.m]
+yML <- DF.PR$FPR[i.m]
+yMU <- DF.PR$TPR[i.m]
+
+pKS.train <- pK1 + 
+             geom_segment(aes(x = xM, y = yML, xend = xM, yend = yMU, colour = "black")) +
+             annotate("text", x = 0.95, y = 0.75, label = paste0("KS = ", KS.train)) + 
+             theme(legend.position = "none") +
+             ggtitle("True and Positive Rates from Logistic Regression for German Credit Data - Training Set")
+
+grid.arrange(pROC.train, pKS.train, nrow = 2)
+```
+
+```{r Predict test set}
+observed.test <- G.test$Creditability
+predicted.test <- predict(LR2, G.test,type='response')
+predicted.test <- round(predicted.test)
+
+#confusion matrix for Test set
+CM.Test <- table(observed.test,predicted.test)
+OA.Test <- sum(diag(CM.Test))/sum(CM.Test) # 0.7471264
+
+#Precision, Recall, F1 for Test Data - Category 1
+Recall.F <- CM.Test[2,2]/(CM.Test[2,1]+CM.Test[2,2])
+Precision.F <- CM.Test[2,2]/(CM.Test[1,2]+CM.Test[2,2])
+F1.F <- 2/((1/Recall.F)+(1/Precision.F))
+
+#Precision, Recall, F1 for Test Data - Category 0
+Recall.F0 <- CM.Test[1,1]/(CM.Test[1,1]+CM.Test[1,2])
+Precision.F0 <- CM.Test[1,1]/(CM.Test[1,1]+CM.Test[2,1])
+F1.F0 <- 2/((1/Recall.F0)+(1/Precision.F0))
+
+PRF1_test_0 <- c(Precision.F0, Recall.F0, F1.F0)
+
+# ROC Curve test set 
+pred <- prediction(predicted.test, observed.test)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = TRUE)
+
+#calculate AUC
+roc_obj <- roc(predicted.test, observed.test)
+AUC.test <- auc(roc_obj)
+GINI.test <- 2 * AUC.test - 1  
+
+# OC curve in ggplot2
+DF.PR <- cbind.data.frame(perf@x.values[[1]], perf@y.values[[1]], perf@alpha.values[[1]])
+colnames(DF.PR) <- c("FPR", "TPR", "cutoff")
+
+# to add the 45 degree line to the plot
+x <- c(0,1)
+y <- c(0,1)
+df2 <- cbind.data.frame(x,y)
+
+#to add the AUC to the plot
+x1 <- c(0,1)
+y1 <- c(1,1)
+df3 <- cbind.data.frame(x1,y1)
+
+pROC.test <- ggplot() + 
+             geom_line(data = DF.PR, aes(x = FPR, y = TPR), color = "darkblue") + 
+             geom_line(data = df2, aes(x = x, y = y), color = "red") + 
+             geom_line(data = df3, aes(x = x1, y = y1), color = "black") + 
+             geom_segment(aes(x = 0, y = 0, xend = 0, yend = 1)) +
+             annotate("text", x = 0.45, y = 0.80, label = "AUC =  0.76") +
+             annotate("text", x = 0.25, y = 0.98, label = "Best AUC = 1") +
+             annotate("text", x = 0.5, y = 0.5, label = "Worst AUC = 0.5") +
+             ggtitle("ROC Plot from Logistic Regression for German Credit Data - Test Set")
+
+#KS (Kolomogorov-Smirnov) Statistic
+#KS = maximum(TPR-FPR) 
+pK1 <- ggplot() + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = FPR), color = "red") + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = TPR), color = "blue")
+
+DF.PR$diff <- DF.PR$TPR - DF.PR$FPR
+KS.test <- max(DF.PR$diff)
+i.m <- which.max(DF.PR$diff)
+xM <- DF.PR$cutoff[i.m]
+yML <- DF.PR$FPR[i.m]
+yMU <- DF.PR$TPR[i.m]
+
+pKS.test <- pK1 + 
+       geom_segment(aes(x = xM, y = yML, xend = xM, yend = yMU, colour = "black")) +
+       annotate("text", x = 0.95, y = 0.74, label = paste0("KS = ", KS.test)) + 
+       theme(legend.position = "none")+
+       ggtitle("True and Positive Rates from Logistic Regression for German Credit Data - Test Set")
+
+grid.arrange(pROC.test, pKS.test, nrow = 2)
+```
+
+```{r Summarize performance results for both training and test sets}
+OA <- c(OA.train, OA.Test)
+names(OA) <- c("Overall accuracy_training", "Overall accuracy_test")
+
+names(PRF1_train_1) <- c("Precision_train_1", "Recall_train_1", "F1_train_1")
+names(PRF1_train_0) <- c("Precision_train_0", "Recall_train_0", "F1_train_0")
+# names(PRF1_test_1) <- c("Precision_test_1", "Recall_test_1", "F1_test_1")
+# names(PRF1_test_0) <- c("Precision_test_0", "Recall_test_0", "F1_test_0")
+
+AUC  <- c(AUC.train, AUC.test)
+GINI <- c(GINI.train, GINI.test)
+names(AUC) <- c("AUC_train", "AUC_test")
+names(GINI) <- c("GINI_train", "GINI_test")
+
+# print performance results for both training and test sets
+print("Logistic Regression Summary of Results for German Credit Data")
+print(PRF1_train_1)
+print(PRF1_train_0)
+# print(PRF1_test_1)
+# print(PRF1_test_0)
+
+print(OA)
+print(AUC)
+print(GINI)
+```
+
+# Charles Book Club
+```{r read Charles Book Club data}
+G <- read.csv("Charles_BookClub.csv", header = TRUE)
+```
+
+```{r}
+head(G)
+tail(G)
+dim(G)
+names(G)
+summary(G)
+``` 
+
+```{r}
+## Check for NA's in the data
+sapply(G, function(x) sum(is.na(x)))
+missmap(G, col = c("red", "yellow"), main = "Missingness Map Charles Book Club Data set")
+```
+
+```{r}
+M <- .25 * nrow(G)
+## To be able to replicate the results, 
+## set initial seed for random number generator
+set.seed(117317)
+holdout <- sample(1:nrow(G), M, replace = F)
+
+G.train <- G[-holdout, ] ## Training set 
+G.test <- G[holdout, ] ## Test set
+dim(G.train) ## 1500 18
+dim(G.test) ## 500 18
+
+names(G.train)
+```
+
+```{r}
+# LR1 <- glm(Florence ~ ., family = binomial("logit"), data = G.train)
+LR1 <- glm(Florence ~ Seq. + ID. + Gender + M + R + F + FirstPurch + ChildBks + YouthBks + CookBks + DoltYBks + RefBks + ArtBks + GeogBks + ItalCook + ItalHAtlas + ItalArt, family = binomial("logit"), data = G.train)
+smre1 <- summary(LR1)
+smre1 ## As long as at least one category of a variable is significant, keep the variable
+      ## Need to keep all the coefficients for a significant categorical variable
+## This comes from the car package
+vif1 <- vif(LR1)
+min(vif1) 
+max(vif1) ## No multicollinearity since the max VIF is 4, which is less than 5
+```
+
+```{r}
+## Use this to predict training set and also the test set
+LR2 <- glm(Florence ~ . -Seq. -ID. -M -ItalCook -RefBks -GeogBks -FirstPurch -ItalHAtlas, family = binomial("logit"), data = G.train)
+
+# LR2 <- glm(Florence ~ Gender + R + F + ChildBks + YouthBks + CookBks + DoltYBks + ArtBks + ItalArt, family = binomial("logit"), data = G.train)
+
+smre2 <- summary(LR2)
+smre2
+vif2 <- vif(LR2)
+max(vif2) 
+
+# write.csv(smre1$coefficients, "Final LR Model for Charles Book Club Data.csv")
+confint(LR2)
+```
+
+```{r}
+# #Predict training data using the model LR1
+observed.train <- G.train$Florence
+predicted.train <- predict(LR2, G.train, type = 'response')
+## predict.train consists of P(Y=1) for each observation in the training set
+predicted.train <- round(predicted.train) ## Round to 0 or 1 to get the Y values
+
+## Evaluate Performance of the LR Classifier on the training set
+## Confusion Matrix of observed versus predicted Y values
+CM.train <- table(observed.train, predicted.train)
+CM.train
+```
+
+```{r}
+FP <- CM.train[1,2]/(CM.train[1,1]+CM.train[1,2]) ## false positive
+FN <- CM.train[2,1]/(CM.train[2,1]+CM.train[2,2]) ## false negative
+FP
+FN
+
+## Overall accuracy 
+## Calculated by summing the correct predictions divided by the total of the Confusion Matrix
+OA.train <- sum(diag(CM.train)) / sum(CM.train)
+OA.train
+```
+
+```{r}
+## Precision, Recall, F1-Measure are performance measures for binary prediction
+## F1-measure = geometric mean of the Precision and Recall
+
+## Compute Precision, Recall, F1 for Category 1, model LR1
+Recall1 <- CM.train[2,2] / (CM.train[2,1] + CM.train[2,2]) ## diag/row sum
+Precision1 <- CM.train[2,2] / (CM.train[1,2] + CM.train[2,2]) ## diag/column sum
+F1.1 <- 2 / ((1 / Recall1) + (1 / Precision1)) ## The geometric mean
+
+PRF1_train_1 <- (c(Precision1, Recall1, F1.1))
+PRF1_train_1
+
+# Category 0
+## Repeat formulas, but use different positions in the Confusion Matrix
+Recall0 <- CM.train[1,1] / (CM.train[1,1] + CM.train[1,2])
+Precision0 <- CM.train[1,1] / (CM.train[1,1] + CM.train[2,1])
+F1.0 <- 2 / ((1 / Recall0) + (1 / Precision0))
+
+PRF1_train_0 <- c(Precision0, Recall0, F1.0)
+PRF1_train_0
+
+## Why is the LR2 model doing a better job of predicting 1's and so-so job for category 0?
+## Because there are so many more 1's than 0's. This is an example of an unbalanced data set.
+## There are methods for dealing with unbalanced data sets.
+```
+
+```{r}
+r2fun(LR1) 
+```
+
+```{r}
+str(predicted.train) 
+predicted.train <- as.numeric(predicted.train)
+
+pred <- prediction(predicted.train, observed.train)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = TRUE)
+
+#calculate AUC
+roc_obj <- roc(predicted.train, observed.train)
+AUC.train <- auc(roc_obj)
+GINI.train <- 2 * AUC.train - 1
+
+# ROC curve in ggplot2
+DF.PR <- cbind.data.frame(perf@x.values[[1]], perf@y.values[[1]], perf@alpha.values[[1]])
+colnames(DF.PR) <- c("FPR", "TPR", "cutoff")
+
+#to add the 45 degree line to the plot
+x <- c(0, 1)
+y <- c(0, 1)
+df2 <- cbind.data.frame(x, y)
+
+# to add the AUC to the plot
+x1 <- c(0, 1)
+y1 <- c(1, 1)
+df3 <- cbind.data.frame(x1, y1)
+
+pROC.train <- ggplot() + 
+  geom_line(data = DF.PR, aes(x = FPR, y = TPR), color = "darkblue") + 
+  geom_line(data = df2, aes(x = x, y = y), color = "red") + 
+  geom_line(data = df3, aes(x = x1, y = y1), color = "black") + 
+  geom_segment(aes(x = 0, y = 0,xend = 0, yend = 1)) +
+  annotate("text", x = 0.45, y = 0.80, label = "AUC =  0.72") +
+  annotate("text", x = 0.25, y = 0.98, label = "Best AUC = 1") +
+  annotate("text", x = 0.5, y = 0.5, label = "Worst AUC = 0.5") +
+  ggtitle("ROC Plot from Logistic Regression for Charles Book Club Data - Training Set")
+```
+
+```{r}
+## Kolmogorov-Smirnov Statistics (Performance Measure for Binary Classifiers)
+## This is not the same as Kolmogorov-Smirnov Test Statistics for testing normality (of residuals in MLR)
+# KS = maximum(TPR-FPR) 
+
+pK1 <- ggplot() + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = FPR), color = "red") + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = TPR), color = "blue")
+
+DF.PR$diff <- DF.PR$TPR - DF.PR$FPR
+KS.train <- max(DF.PR$diff)
+i.m <- which.max(DF.PR$diff)
+xM <- DF.PR$cutoff[i.m]
+yML <- DF.PR$FPR[i.m]
+yMU <- DF.PR$TPR[i.m]
+
+pKS.train <- pK1 + 
+             geom_segment(aes(x = xM, y = yML, xend = xM, yend = yMU, colour = "black")) +
+             annotate("text", x = 0.95, y = 0.75, label = paste0("KS = ", KS.train)) + 
+             theme(legend.position = "none") +
+             ggtitle("True and Positive Rates from Logistic Regression for Charles Book Club Data - Training Set")
+
+grid.arrange(pROC.train, pKS.train, nrow = 2)
+```
+
+```{r}
+observed.test <- G.test$Florence
+predicted.test <- predict(LR2, G.test,type='response')
+predicted.test <- round(predicted.test)
+
+#confusion matrix for Test set
+CM.Test <- table(observed.test,predicted.test)
+OA.Test <- sum(diag(CM.Test))/sum(CM.Test) # 0.7471264
+
+#Precision, Recall, F1 for Test Data - Category 1
+Recall.F <- CM.Test[2,2]/(CM.Test[2,1]+CM.Test[2,2])
+Precision.F <- CM.Test[2,2]/(CM.Test[1,2]+CM.Test[2,2])
+F1.F <- 2/((1/Recall.F)+(1/Precision.F))
+
+#Precision, Recall, F1 for Test Data - Category 0
+Recall.F0 <- CM.Test[1,1]/(CM.Test[1,1]+CM.Test[1,2])
+Precision.F0 <- CM.Test[1,1]/(CM.Test[1,1]+CM.Test[2,1])
+F1.F0 <- 2/((1/Recall.F0)+(1/Precision.F0))
+
+PRF1_test_0 <- c(Precision.F0, Recall.F0, F1.F0)
+
+# ROC Curve test set 
+pred <- prediction(predicted.test, observed.test)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = TRUE)
+
+#calculate AUC
+roc_obj <- roc(predicted.test, observed.test)
+AUC.test <- auc(roc_obj)
+GINI.test <- 2 * AUC.test - 1  
+
+# OC curve in ggplot2
+DF.PR <- cbind.data.frame(perf@x.values[[1]], perf@y.values[[1]], perf@alpha.values[[1]])
+colnames(DF.PR) <- c("FPR", "TPR", "cutoff")
+
+# to add the 45 degree line to the plot
+x <- c(0,1)
+y <- c(0,1)
+df2 <- cbind.data.frame(x,y)
+
+#to add the AUC to the plot
+x1 <- c(0,1)
+y1 <- c(1,1)
+df3 <- cbind.data.frame(x1,y1)
+
+pROC.test <- ggplot() + 
+             geom_line(data = DF.PR, aes(x = FPR, y = TPR), color = "darkblue") + 
+             geom_line(data = df2, aes(x = x, y = y), color = "red") + 
+             geom_line(data = df3, aes(x = x1, y = y1), color = "black") + 
+             geom_segment(aes(x = 0, y = 0, xend = 0, yend = 1)) +
+             annotate("text", x = 0.45, y = 0.80, label = "AUC =  0.76") +
+             annotate("text", x = 0.25, y = 0.98, label = "Best AUC = 1") +
+             annotate("text", x = 0.5, y = 0.5, label = "Worst AUC = 0.5") +
+             ggtitle("ROC Plot from Logistic Regression for Charles Book Club Data - Test Set")
+
+#KS (Kolomogorov-Smirnov) Statistic
+#KS = maximum(TPR-FPR) 
+pK1 <- ggplot() + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = FPR), color = "red") + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = TPR), color = "blue")
+
+DF.PR$diff <- DF.PR$TPR - DF.PR$FPR
+KS.test <- max(DF.PR$diff)
+i.m <- which.max(DF.PR$diff)
+xM <- DF.PR$cutoff[i.m]
+yML <- DF.PR$FPR[i.m]
+yMU <- DF.PR$TPR[i.m]
+
+pKS.test <- pK1 + 
+       geom_segment(aes(x = xM, y = yML, xend = xM, yend = yMU, colour = "black")) +
+       annotate("text", x = 0.95, y = 0.74, label = paste0("KS = ", KS.test)) + 
+       theme(legend.position = "none")+
+       ggtitle("True and Positive Rates from Logistic Regression for Charles Book Club Data - Test Set")
+
+grid.arrange(pROC.test, pKS.test, nrow = 2)
+```
+
+```{r}
+OA <- c(OA.train, OA.Test)
+names(OA) <- c("Overall accuracy_training", "Overall accuracy_test")
+
+names(PRF1_train_1) <- c("Precision_train_1", "Recall_train_1", "F1_train_1")
+names(PRF1_train_0) <- c("Precision_train_0", "Recall_train_0", "F1_train_0")
+# names(PRF1_test_1) <- c("Precision_test_1", "Recall_test_1", "F1_test_1")
+# names(PRF1_test_0) <- c("Precision_test_0", "Recall_test_0", "F1_test_0")
+
+AUC  <- c(AUC.train, AUC.test)
+GINI <- c(GINI.train, GINI.test)
+names(AUC) <- c("AUC_train", "AUC_test")
+names(GINI) <- c("GINI_train", "GINI_test")
+
+# print performance results for both training and test sets
+print("Logistic Regression Summary of Results for Charles Book Club Data")
+print(PRF1_train_1)
+print(PRF1_train_0)
+# print(PRF1_test_1)
+# print(PRF1_test_0)
+
+print(OA)
+print(AUC)
+print(GINI)
+```
+
+# Titanic
+```{r read Titanic data}
+dt <- read.csv("titanic3.csv", header = TRUE) %>%
+  select(survived, pclass, sex, age, sibsp, parch) %>%
+  filter(!is.na(pclass) & !is.na(sex) & !is.na(age) & !is.na(sibsp) & !is.na(parch)) %>%
+  mutate(survived = as.numeric(survived))
+```
+
+```{r}
+head(dt)
+tail(dt)
+dim(dt)
+names(dt)
+summary(dt)
+``` 
+
+```{r}
+## Check for NA's in the data
+sapply(dt, function(x) sum(is.na(x)))
+missmap(dt, col = c("red", "yellow"), main = "Missindtness Map Titanic Data set")
+```
+
+```{r}
+M <- .25 * nrow(dt)
+## To be able to replicate the results, 
+## set initial seed for random number generator
+set.seed(117317)
+holdout <- sample(1:nrow(dt), M, replace = F)
+
+dt.train <- dt[-holdout, ] ## Training set 
+dt.test <- dt[holdout, ] ## Test set
+dim(dt.train) ## 982 14
+dim(dt.test) ## 327 14
+
+names(dt.train)
+```
+
+```{r}
+LR1 <- glm(survived ~ pclass + sex + age + sibsp + parch, family = binomial("logit"), data = dt.train)
+smre1 <- summary(LR1)
+smre1 ## As long as at least one category of a variable is significant, keep the variable
+      ## Need to keep all the coefficients for a significant categorical variable
+## This comes from the car package
+vif1 <- vif(LR1)
+min(vif1) 
+max(vif1) ## No multicollinearity since the max VIF is 4, which is less than 5
+```
+
+```{r}
+## Use this to predict training set and also the test set
+LR2 <- glm(survived ~ pclass + sex + age + sibsp, family = binomial("logit"), data = dt.train)
+
+smre2 <- summary(LR2)
+smre2
+vif2 <- vif(LR2)
+max(vif2) 
+
+# write.csv(smre1$coefficients, "Final LR Model for Titanic Data.csv")
+confint(LR2)
+```
+
+```{r}
+# #Predict training data using the model LR1
+observed.train <- dt.train$survived
+predicted.train <- predict(LR2, dt.train, type = 'response')
+## predict.train consists of P(Y=1) for each observation in the training set
+predicted.train <- round(predicted.train) ## Round to 0 or 1 to get the Y values
+
+## Evaluate Performance of the LR Classifier on the training set
+## Confusion Matrix of observed versus predicted Y values
+CM.train <- table(observed.train, predicted.train)
+CM.train
+```
+
+```{r}
+FP <- CM.train[1,2]/(CM.train[1,1]+CM.train[1,2]) ## false positive
+FN <- CM.train[2,1]/(CM.train[2,1]+CM.train[2,2]) ## false negative
+FP
+FN
+
+## Overall accuracy 
+## Calculated by summing the correct predictions divided by the total of the Confusion Matrix
+OA.train <- sum(diag(CM.train)) / sum(CM.train)
+OA.train
+```
+
+```{r}
+## Precision, Recall, F1-Measure are performance measures for binary prediction
+## F1-measure = geometric mean of the Precision and Recall
+
+## Compute Precision, Recall, F1 for Category 1, model LR1
+Recall1 <- CM.train[2,2] / (CM.train[2,1] + CM.train[2,2]) ## diag/row sum
+Precision1 <- CM.train[2,2] / (CM.train[1,2] + CM.train[2,2]) ## diag/column sum
+F1.1 <- 2 / ((1 / Recall1) + (1 / Precision1)) ## The geometric mean
+
+PRF1_train_1 <- (c(Precision1, Recall1, F1.1))
+PRF1_train_1
+
+# Category 0
+## Repeat formulas, but use different positions in the Confusion Matrix
+Recall0 <- CM.train[1,1] / (CM.train[1,1] + CM.train[1,2])
+Precision0 <- CM.train[1,1] / (CM.train[1,1] + CM.train[2,1])
+F1.0 <- 2 / ((1 / Recall0) + (1 / Precision0))
+
+PRF1_train_0 <- c(Precision0, Recall0, F1.0)
+PRF1_train_0
+
+## Why is the LR2 model doing a better job of predicting 1's and so-so job for category 0?
+## Because there are so many more 1's than 0's. This is an example of an unbalanced data set.
+## There are methods for dealing with unbalanced data sets.
+```
+
+```{r}
+r2fun(LR1) 
+```
+
+```{r}
+str(predicted.train) 
+predicted.train <- as.numeric(predicted.train)
+
+pred <- prediction(predicted.train, observed.train)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = TRUE)
+
+#calculate AUC
+roc_obj <- roc(predicted.train, observed.train)
+AUC.train <- auc(roc_obj)
+GINI.train <- 2 * AUC.train - 1
+
+# ROC curve in ggplot2
+DF.PR <- cbind.data.frame(perf@x.values[[1]], perf@y.values[[1]], perf@alpha.values[[1]])
+colnames(DF.PR) <- c("FPR", "TPR", "cutoff")
+
+#to add the 45 degree line to the plot
+x <- c(0, 1)
+y <- c(0, 1)
+df2 <- cbind.data.frame(x, y)
+
+# to add the AUC to the plot
+x1 <- c(0, 1)
+y1 <- c(1, 1)
+df3 <- cbind.data.frame(x1, y1)
+
+pROC.train <- ggplot() + 
+  geom_line(data = DF.PR, aes(x = FPR, y = TPR), color = "darkblue") + 
+  geom_line(data = df2, aes(x = x, y = y), color = "red") + 
+  geom_line(data = df3, aes(x = x1, y = y1), color = "black") + 
+  geom_segment(aes(x = 0, y = 0,xend = 0, yend = 1)) +
+  annotate("text", x = 0.45, y = 0.80, label = "AUC =  0.72") +
+  annotate("text", x = 0.25, y = 0.98, label = "Best AUC = 1") +
+  annotate("text", x = 0.5, y = 0.5, label = "Worst AUC = 0.5") +
+  ggtitle("ROC Plot from Logistic Regression for Titanic Data - Training Set")
+```
+
+```{r}
+## Kolmogorov-Smirnov Statistics (Performance Measure for Binary Classifiers)
+## This is not the same as Kolmogorov-Smirnov Test Statistics for testing normality (of residuals in MLR)
+# KS = maximum(TPR-FPR) 
+
+pK1 <- ggplot() + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = FPR), color = "red") + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = TPR), color = "blue")
+
+DF.PR$diff <- DF.PR$TPR - DF.PR$FPR
+KS.train <- max(DF.PR$diff)
+i.m <- which.max(DF.PR$diff)
+xM <- DF.PR$cutoff[i.m]
+yML <- DF.PR$FPR[i.m]
+yMU <- DF.PR$TPR[i.m]
+
+pKS.train <- pK1 + 
+             geom_segment(aes(x = xM, y = yML, xend = xM, yend = yMU, colour = "black")) +
+             annotate("text", x = 0.95, y = 0.75, label = paste0("KS = ", KS.train)) + 
+             theme(legend.position = "none") +
+             ggtitle("True and Positive Rates from Logistic Regression for Titanic Data - Training Set")
+
+grid.arrange(pROC.train, pKS.train, nrow = 2)
+```
+
+```{r}
+observed.test <- dt.test$survived
+predicted.test <- predict(LR2, dt.test,type = "response")
+predicted.test <- round(predicted.test)
+
+#confusion matrix for Test set
+CM.Test <- table(observed.test,predicted.test)
+OA.Test <- sum(diag(CM.Test))/sum(CM.Test) # 0.7471264
+
+#Precision, Recall, F1 for Test Data - Category 1
+Recall.F <- CM.Test[2,2]/(CM.Test[2,1]+CM.Test[2,2])
+Precision.F <- CM.Test[2,2]/(CM.Test[1,2]+CM.Test[2,2])
+F1.F <- 2/((1/Recall.F)+(1/Precision.F))
+
+#Precision, Recall, F1 for Test Data - Category 0
+Recall.F0 <- CM.Test[1,1]/(CM.Test[1,1]+CM.Test[1,2])
+Precision.F0 <- CM.Test[1,1]/(CM.Test[1,1]+CM.Test[2,1])
+F1.F0 <- 2/((1/Recall.F0)+(1/Precision.F0))
+
+PRF1_test_0 <- c(Precision.F0, Recall.F0, F1.F0)
+
+# ROC Curve test set 
+pred <- prediction(predicted.test, observed.test)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = TRUE)
+
+#calculate AUC
+roc_obj <- roc(predicted.test, observed.test)
+AUC.test <- auc(roc_obj)
+GINI.test <- 2 * AUC.test - 1  
+
+# OC curve in ggplot2
+DF.PR <- cbind.data.frame(perf@x.values[[1]], perf@y.values[[1]], perf@alpha.values[[1]])
+colnames(DF.PR) <- c("FPR", "TPR", "cutoff")
+
+# to add the 45 degree line to the plot
+x <- c(0,1)
+y <- c(0,1)
+df2 <- cbind.data.frame(x,y)
+
+#to add the AUC to the plot
+x1 <- c(0,1)
+y1 <- c(1,1)
+df3 <- cbind.data.frame(x1,y1)
+
+pROC.test <- ggplot() + 
+             geom_line(data = DF.PR, aes(x = FPR, y = TPR), color = "darkblue") + 
+             geom_line(data = df2, aes(x = x, y = y), color = "red") + 
+             geom_line(data = df3, aes(x = x1, y = y1), color = "black") + 
+             geom_segment(aes(x = 0, y = 0, xend = 0, yend = 1)) +
+             annotate("text", x = 0.45, y = 0.80, label = "AUC =  0.76") +
+             annotate("text", x = 0.25, y = 0.98, label = "Best AUC = 1") +
+             annotate("text", x = 0.5, y = 0.5, label = "Worst AUC = 0.5") +
+             ggtitle("ROC Plot from Logistic Regression for Titanic Data - Test Set")
+
+#KS (Kolomogorov-Smirnov) Statistic
+#KS = maximum(TPR-FPR) 
+pK1 <- ggplot() + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = FPR), color = "red") + 
+       geom_line(data = DF.PR, aes(x = cutoff, y = TPR), color = "blue")
+
+DF.PR$diff <- DF.PR$TPR - DF.PR$FPR
+KS.test <- max(DF.PR$diff)
+i.m <- which.max(DF.PR$diff)
+xM <- DF.PR$cutoff[i.m]
+yML <- DF.PR$FPR[i.m]
+yMU <- DF.PR$TPR[i.m]
+
+pKS.test <- pK1 + 
+       geom_segment(aes(x = xM, y = yML, xend = xM, yend = yMU, colour = "black")) +
+       annotate("text", x = 0.95, y = 0.74, label = paste0("KS = ", KS.test)) + 
+       theme(legend.position = "none") +
+       ggtitle("True and Positive Rates from Logistic Regression for Titanic Data - Test Set")
+
+grid.arrange(pROC.test, pKS.test, nrow = 2)
+```
+
+```{r}
+OA <- c(OA.train, OA.Test)
+names(OA) <- c("Overall accuracy_training", "Overall accuracy_test")
+
+names(PRF1_train_1) <- c("Precision_train_1", "Recall_train_1", "F1_train_1")
+names(PRF1_train_0) <- c("Precision_train_0", "Recall_train_0", "F1_train_0")
+# names(PRF1_test_1) <- c("Precision_test_1", "Recall_test_1", "F1_test_1")
+# names(PRF1_test_0) <- c("Precision_test_0", "Recall_test_0", "F1_test_0")
+
+AUC  <- c(AUC.train, AUC.test)
+GINI <- c(GINI.train, GINI.test)
+names(AUC) <- c("AUC_train", "AUC_test")
+names(GINI) <- c("GINI_train", "GINI_test")
+
+# print performance results for both training and test sets
+print("Logistic Regression Summary of Results for Titanic Data")
+print(PRF1_train_1)
+print(PRF1_train_0)
+# print(PRF1_test_1)
+# print(PRF1_test_0)
+
+print(OA)
+print(AUC)
+print(GINI)
+```
+
+

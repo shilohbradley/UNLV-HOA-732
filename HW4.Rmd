@@ -1,0 +1,63 @@
+---
+title: "HW4 - Simple Linear Regression"
+author: "Shiloh Bradley"
+date: "6/10/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(gridExtra)
+
+setwd("~/Desktop/Personal Computer/MBA/HOA 732/")
+```
+
+``` {r Read Body Size Bite Force Data}
+B <- read.csv("BodySize BiteForce2.csv",header=TRUE)
+head(B)
+tail(B)
+```
+
+``` {r}
+lm1 <- lm(MBF_LBS~MBW_KG,data=B)
+summary(lm1)
+```
+
+```{r}
+p1 <- ggplot(B, aes(x = MBW_KG, y = MBF_LBS) ) +
+     geom_point() +
+     geom_smooth(method = "lm", alpha = .5)+
+     ggtitle("Data and fitted line with confidence ribbon")+
+     theme_bw()
+```
+
+```{r}
+p2 <- ggplot(B, aes(x = MBW_KG, y = MBF_LBS) ) +
+     geom_point() +
+     geom_smooth(method = "lm", se = FALSE)+
+     ggtitle("Data and fitted line")+
+     theme_bw()
+```
+
+```{r combine the 2 plots}
+grid.arrange(p1,p2,nrow=2)
+```
+
+``` {r normality test for residuals from SLR}
+#qq plot with normal line (normality test)
+df <- as.data.frame(lm1$residuals)
+colnames(df)[1] <- "residuals"
+
+shapiro.test(df$residuals) 
+
+ggplot(df)+stat_qq(aes(sample=residuals)) + 
+  geom_qq_line(aes(sample=residuals))+
+  geom_text(aes(x=0.5, y=-20, label="Shapiro-test p-value = 0.001177"))
+```
+
+There is no way for us to know if this Covariance is large or small. We need a better measure for the strength of the relationship.
+```{r}
+cov(B$MBW_KG,B$MBF_LBS)
+```

@@ -1,0 +1,174 @@
+---
+title: "Homework 9 - Support Vector Machines"
+author: "Shiloh Bradley"
+date: "6/28/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+source("PRF1.R")
+
+library(car)
+library(dummies)
+library(dplyr)
+library(e1071)
+# see details of svm method at
+# https://cran.r-project.org/web/packages/e1071/e1071.pdf
+```
+
+```{r function to normalize predictors}
+normalize <- function(x) {
+  x <- na.omit(x)
+  return ((x - min(x)) / (max(x) - min(x)))  
+}
+```
+
+# Titanic
+```{r read Titanic data}
+df <- read.csv("titanic3.csv", header = TRUE)
+dim(df) ## 1309 14
+names(df)
+head(df)
+summary(df)
+```
+
+```{r retain all relevant columns}
+df <- df %>%
+      select(survived, pclass, sex, age, sibsp, parch) %>%
+      filter(!is.na(pclass) & !is.na(sex) & !is.na(age) & !is.na(sibsp) & !is.na(parch)) %>%
+      mutate(survived = as.factor(survived)) 
+## don't need to normalize any variables
+```
+
+```{r}
+n.NA <- colSums(is.na(df))
+n.NA
+```
+
+```{r create formula}
+features0 <- setdiff(names(df), "survived")
+Formula0 <- formula(paste("survived ~ ", 
+                          paste(features0, collapse = " + ")))
+Formula0
+```
+
+```{r split data}
+## Don't split the data before normalizing the data and creating the dummy variables
+M <- trunc(.25 * nrow(df)) 
+
+# to be able to replicate the results, set initial seed for random 
+# number generator
+set.seed(1797317)
+holdout <- sample(1:nrow(df), M, replace = F)
+df.train <- df[-holdout, ]   # Training set 785  6
+df.test <- df[holdout, ]    # Test set  of 261  6
+dim(df.train)
+dim(df.test)
+```
+
+```{r fit model}
+svm1 <- svm(Formula0, kernel = "radial", type = "C-classification", probability = TRUE, data = df.train)
+print(svm1) 
+names(svm1)
+```
+
+```{r tune first model}
+# SVM performance can be improved further by tuning the SVM
+# perform a grid search to tune(optimize) SVM HYPERPARAMETERS
+tune.svm <- tune(svm, Formula0,
+                 kernel = "radial", data = df.train,
+                 type = "C-classification", probability = TRUE,
+                 ranges = list(epsilon = seq(0, 1, 0.1), cost = 2^(2:9)))
+print(tune.svm)
+# Draw the tuning graph
+plot(tune.svm)
+```
+
+```{r tune second model}
+tune.svm2 <- tune(svm, Formula0,
+                  kernel = "radial", data = df.train,
+                  type = "C-classification", probability = TRUE,
+                  ranges = list(epsilon = seq(0, 0.2, 0.02), cost = seq(2, 10, 2)))
+
+plot(tune.svm2)
+tune.svm2
+```
+
+```{r fit final}
+svmF <- svm(Formula0,
+            kernel = "radial", data = df.train,
+            type = "C-classification", probability = TRUE,
+            ranges = list(epsilon = 0.025, cost = 6, probability = TRUE))
+
+svmF
+```
+
+```{r Confusion Matrices for training and test sets}
+Y.train <- df.train$survived
+Y.test <- df.test$survived
+Ypred.train_svm <- svmF$fitted
+Ypred.test_svm <- predict(svmF, df.test, probability = TRUE, decision.value = TRUE)
+temp.prob <- attr(Ypred.test_svm, "probabilities")
+Yhat.test_svm <- round(temp.prob[,1])
+CM.train_svm <- table(Y.train, Ypred.train_svm)
+CM.test_svm <- table(Y.test, Yhat.test_svm)
+OA.train_svm <- sum(diag(CM.train_svm))/sum(CM.train_svm)
+PRF1.train_svm <- PRF1(CM.train_svm)
+OA.test_svm <- sum(diag(CM.test_svm))/sum(CM.test_svm)
+PRF1.test_svm <- PRF1(CM.test_svm)
+```
+
+```{r output SVM results for training and test sets}
+df.PRF1_svm <- rbind.data.frame(PRF1.train_svm, PRF1.test_svm)
+colnames(df.PRF1_svm) <- c("Precision.1_svm", "Recall.1", "F1.1_svm",
+                           "Precision.0_svm", "Recall.0", "F1.0_svm")
+rownames(df.PRF1_svm) <- c("Training", "Test")
+
+df.OA_svm <- rbind.data.frame(OA.train_svm, OA.test_svm)
+colnames(df.OA_svm) <- "Overall_Accuracy" 
+rownames(df.OA_svm) <- c("Training", "Test")
+round(df.PRF1_svm, 2)
+round(df.OA_svm, 2)
+```
+
+```{r Fit logistic regression model to survived}
+LR1 <- glm(Formula0, family = binomial("logit"), data = df.train)
+smre1 <- summary(LR1)
+
+vif1 <- vif(LR1)
+min(vif1) 
+vif1 ## Don't need to drop any variables because all VIF's < 5
+```
+
+```{r predict test set using final LR model, compute CM}
+LRF <- LR1
+CM.train_LR <- table(Y.train, round(LRF$fitted.values))
+CM.train_LR
+pred.test_LR <- predict(LRF, df.test, type = "response")
+Yhat.test_LR <- round(pred.test_LR)
+#head(Yhat.test_LR)
+CM.test_LR <- table(df.test$survived, Yhat.test_LR)
+CM.test_LR
+```
+
+```{r performance measures for train and test sets, LR model}
+PRF1.train_LR <- PRF1(CM.train_LR) 
+PRF1.test_LR <- PRF1(CM.test_LR) 
+OA.train_LR <- sum(diag(CM.train_LR))/sum(CM.train_LR)
+OA.test_LR <- sum(diag(CM.test_LR))/sum(CM.test_LR)
+```
+
+```{r output LR results for training and test sets}
+df.PRF1_LR <- rbind.data.frame(PRF1.train_LR,PRF1.test_LR)
+colnames(df.PRF1_LR) <- c("Precision.1_LR", "Recall.1", "F1.1_LR",
+                          "Precision.0_LR", "Recall.0", "F1.0_LR")
+rownames(df.PRF1_LR) <- c("Training", "Test")
+
+df.OA_LR <- rbind.data.frame(OA.train_LR, OA.test_LR)
+colnames(df.OA_LR) <- "Overall_Accuracy" 
+rownames(df.OA_LR) <- c("Training", "Test")
+round(df.PRF1_LR, 2)
+round(df.OA_LR,2)
+```

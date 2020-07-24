@@ -1,0 +1,305 @@
+---
+title: "Final Project"
+author: "Shiloh Bradley"
+date: "7/9/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+source("normalize.R")
+source("PRF1.R")
+source("RMSE.r")
+
+library(car)
+library(dplyr)
+library(e1071)
+library(gbm)
+library(ggplot2)
+library(randomForest)
+library(xgboost)
+```
+
+## Real Estate Data
+```{r read in Real Estate Data}
+df <- read.csv("Real estate valuation data set.csv") %>%
+      mutate(N.Cstores = as.numeric(N.Cstores),
+             Y = normalize(Y)) %>%
+      select(-No)
+
+# df <- apply(df, 2, normalize)
+# summary(df.Z)
+```
+
+```{r Check for NAs in Real Estate Data}
+n.NA <- colSums(is.na(df))
+n.NA ## there are none
+```
+
+```{r Split Real Estate Data}
+set.seed(1197317)
+
+M <- trunc(.25 * nrow(df)) 
+
+holdout <- sample(1:nrow(df), M, replace = F)
+df.train <- df[-holdout, ]   
+df.test <- df[holdout, ]    
+dim(df.train) ## 311  8
+dim(df.test)  ## 103  8
+```
+### (a) Fit MLR model to Y as a function of the potential predictors Age, Dist.MRT, N.Cstores,
+Dist. Verify assumptions, using the training set. Compute RMSE and R^2 for both training and test sets.
+```{r, warning = FALSE}
+MLR1 <- glm(Y ~ Age + Dist.MRT + N.Cstores + Dist, 
+           family = binomial("logit"),
+           data = df.train)
+
+summary(MLR1)
+
+vif(MLR1)
+```
+
+### (b) Fit SVM model to Y as a function of the potential predictors Age, Dist.MRT, N.Cstores,
+Dist. Verify assumptions, using the training set. Compute RMSE and R^2 for both training and test sets.
+```{r Fit SVM model for Real Estate Data}
+svm1 <- svm(formula = Y ~ Age + Dist.MRT + N.Cstores + Dist,
+            data = df.train, 
+            kernel = "radial", 
+            probability = TRUE)
+print(svm1) 
+names(svm1)
+```
+
+```{r}
+# SVM performance can be improved further by tuning the SVM
+# perform a grid search to tune(optimize) SVM HYPERPARAMETERS
+tune.svm <- tune(svm, 
+                 Y ~ Age + Dist.MRT + N.Cstores + Dist,
+                 kernel = "radial", 
+                 data = df.train,
+                 ranges = list(epsilon = seq(0, 0.4, 0.1), 
+                               cost = c(1:10))
+                 )
+
+print(tune.svm)
+# Draw the tuning graph
+plot(tune.svm)
+```
+
+```{r}
+tune.svm2 <- tune(svm, 
+                  Y ~ Age + Dist.MRT + N.Cstores + Dist, 
+                  kernel = "radial", 
+                  data = df.train,
+                  ranges = list(epsilon = seq(0.15, 0.25, 0.01), 
+                                cost = c(1:4))
+                  )
+
+plot(tune.svm2)
+tune.svm2
+```
+
+```{r fit final}
+svmF <- svm(formula = Y ~ Age + Dist.MRT + N.Cstores + Dist,
+            kernel = "radial", 
+            data = df.train,
+            ranges = list(epsilon = seq(0.15, 0.25, 0.01), 
+                          cost = c(1:4))
+            )
+
+svmF
+```
+
+```{r performance measures for train and test sets, svm model}
+Y.train <- df.train$Y
+Y.test <- df.test$Y
+Yhat.train_svm <- svmF$fitted
+Yhat.test_svm <- predict(svmF, df.test)
+RMSE.train_svm <- RMSE(Y.train, Yhat.train_svm)
+RMSE.test_svm <- RMSE(Y.test, Yhat.test_svm)
+df.RMSE_svm <- rbind.data.frame(RMSE.train_svm, RMSE.test_svm)
+colnames(df.RMSE_svm) <- c("svm.R_Square", "svm.RMSE")
+rownames(df.RMSE_svm) <- c("train", "test")
+df.RMSE_svm
+```
+
+### (c) Compare the results for MLR and SVM for both training and test sets.
+
+
+## Bank data
+```{r Read Bank data}
+df <- read.csv("bank.1.csv")
+```
+
+```{r Check for NAs in Bank Data}
+n.NA <- colSums(is.na(df))
+n.NA ## there are none
+```
+
+```{r Split Bank Data}
+set.seed(1197317)
+
+M <- trunc(.25 * nrow(df)) 
+
+holdout <- sample(1:nrow(df), M, replace = F)
+df.train <- df[-holdout, ]   
+df.test <- df[holdout, ]    
+dim(df.train) ## 3391   17
+dim(df.test)  ## 1130   17
+```
+### (a) Fit a logistic regression model to the response y=yes, and compute its PRF1 values.
+### (Note: The LR model must have all VIF < 5, and all predictors must be significant at test size 0.05).
+```{r}
+LR1 <- glm(y ~ ., 
+           family = binomial("logit"),
+           data = df.train)
+
+# summary(LR1)
+
+vif(LR1)
+```
+```{r drop poutcome}
+LR2 <- glm(y ~ . - poutcome, 
+           family = binomial("logit"),
+           data = df.train)
+
+# summary(LR2)
+
+vif(LR2)
+```
+
+```{r drop job}
+LR3 <- glm(y ~ . - poutcome - job, 
+           family = binomial("logit"),
+           data = df.train)
+
+# summary(LR3)
+
+vif(LR3)
+```
+
+```{r drop insignificant values}
+LRF <- glm(y ~ . - poutcome - job - education - day - age - default - balance - pdays, 
+           family = binomial("logit"),
+           data = df.train)
+
+summary(LRF)
+```
+### (b) Fit the default random forest model to the response, and compare the PRF1 values of the LR and the default random forest model.
+
+```{r default Full RF model of Titanic Data}
+features <- setdiff(names(df.train), "y")
+rf1 <- randomForest(y ~ ., data = df.train)
+rf1
+CM.rf_train <- rf1$confusion
+CM.rf_train
+OA.rf_train <- sum(diag(CM.rf_train))/sum(CM.rf_train)
+```
+
+```{r simple tuning of random forest for Titanic data}
+set.seed(7231)
+rf2 <- tuneRF(
+  x          = df.train[features],
+  y          = factor(df.train$y),
+  ntreeTry   = 500,
+  mtryStart  = 2,
+  stepFactor = 2,
+  improve    = 0.01,
+  trace      = FALSE      # to not show real-time progress 
+)
+```
+
+```{r optimal RF model of Titanic data}
+set.seed(11713)
+rf2 <- randomForest(y ~ ., mtry = 4, ntree = 500, importance = TRUE, data = df.train)
+rf2
+CM.rf_train <- rf2$confusion
+CM.rf_train
+OA.rf_train <- sum(diag(CM.rf_train))/sum(CM.rf_train)
+```
+
+```{r variable importance Titanic}
+VI.FL <- as.data.frame(rf2$importance)
+names(VI.FL)
+
+VIFL.sort <- VI.FL %>% arrange(MeanDecreaseGini)
+
+VIFL.sort$X <- rownames(VIFL.sort)
+VIFL.sort$X <- factor(VIFL.sort$X, levels = VIFL.sort$X)
+
+p.FL <- ggplot(VIFL.sort, aes(x = X, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "lightblue", color = "darkblue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("Mean Decrease in Gini Index") + 
+  xlab("Predictor") +
+  ggtitle("Variable Importance Plot of Full RF Model: Bank Data")
+
+p.FL 
+```
+
+```{r reduced RF model}
+set.seed(11713)
+rf3 <- randomForest(y ~ . , mtry = 4, ntree = 500, data = df.train)
+rf3
+CM.rf_train <- rf3$confusion
+CM.rf_train
+OA.rf_train <- sum(diag(CM.rf_train))/sum(CM.rf_train)
+OA.rf_train
+```
+
+```{r variable importance final RF model}
+VI.FL <- as.data.frame(rf3$importance)
+names(VI.FL)
+
+VIFL.sort <- VI.FL %>% arrange(MeanDecreaseGini)
+
+VIFL.sort$X <- rownames(VIFL.sort)
+VIFL.sort$X <- factor(VIFL.sort$X, levels = VIFL.sort$X)
+
+p.FL <- ggplot(VIFL.sort, aes(x = X, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "lightblue", color = "darkblue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("Mean Decrease in Gini Index") + 
+  xlab("Predictor") +
+  ggtitle("Variable Importance Plot of Full RF Model: Bank Data")
+
+p.FL
+```
+
+```{r}
+prf1_train <- PRF1(CM.rf_train)
+prf1_train
+```
+
+```{r predict test set}
+pred.test <- predict(rf3, df.test)
+CM.test <- table(df.test$y, pred.test)
+CM.test
+```
+
+```{r}
+prf1_test <- PRF1(CM.test)
+prf1_test
+```
+
+### (c) Extra Credit: Fit the default xgboost model to the response, and compare the PRF1
+values of the three fitted models.
+```{r}
+gbm1 <- gbm(
+  y ~ .,
+  data = df.train,
+  distribution = "gaussian",
+  n.trees = 10000,
+  shrinkage = 0.001,
+  interaction.depth = 4,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )  
+# print results
+print(gbm1)
+smreGB1 <- summary(gbm1)
+str(smreGB1)
+names(smreGB1)
+```
+

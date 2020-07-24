@@ -1,0 +1,61 @@
+---
+title: "Simple SVM Example"
+author: "Shiloh Bradley"
+date: "6/30/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+source("PRF1.R")
+
+library(e1071)
+library(MASS)
+```
+
+```{r read data, echo=FALSE}
+df <- read.csv("Simple SVM Example.csv")
+```
+
+```{r check out the data}
+head(df)
+summary(df)
+```
+
+Since the predictors X and Y have similar ranges (approximately 0-5), we don't really need to normalize the data.
+The response variable (if continuous) does NOT NEED to be normalized.
+```{r}
+svm1 <- svm(Y ~ X + y, data = df, kernel = "linear", type = "C-classification", probability = TRUE)
+svm2 <- svm(Y ~ X + y, data = df, kernel = "radial", type = "C-classification", probability = TRUE) ## Creates a non-linear function
+
+print(svm1)
+names(svm1)
+```
+
+```{r predict data set df from the fitted model svm1}
+## One way to get y-hat from the data set
+## For Linear model
+temp.prob <- attr(svm1, "fitted")
+Ypred.svm1 <- svm1$fitted
+
+CM.svm1 <- table(df$Y, Ypred.svm1)
+CM.svm1
+
+PRF1.svm <- PRF1(CM.svm1)
+PRF1.svm
+
+## For Radial model
+Ypred.svm2 <- svm2$fitted
+
+CM.svm2 <- table(df$Y, Ypred.svm2)
+CM.svm2
+
+PRF2.svm <- PRF1(CM.svm2)
+PRF2.svm
+```
+
+```{r}
+plot(svm1, df, y ~ x)
+plot(svm2, df, y ~ x)
+```

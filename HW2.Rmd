@@ -1,0 +1,111 @@
+---
+title: "HW2"
+author: "Shiloh Bradley"
+date: "6/9/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+
+setwd("~/Desktop/Personal Computer/MBA/HOA 732/")
+```
+
+```{r 2-sample t-test}
+P <- read.csv("2 production_lines.csv",header=TRUE)
+
+#1(a) Box plots with sample means shown and histograms
+B1 <- ggplot(P,aes(x=1,y=Line_1)) + geom_boxplot()+
+stat_summary(fun= "mean", geom="point",color="red")+
+            labs(title="Box Plot of Weights of Cans") 
+
+B2 <- ggplot(P,aes(x=1,y=Line_2)) + geom_boxplot()+
+stat_summary(fun = "mean", geom="point",color="blue")+
+            labs(title="Box Plot of Weights of Cans") 
+
+H1 <- ggplot(data=P, aes(Line_1)) + geom_histogram(breaks=seq(10, 20, by = 1), 
+                 col="red", 
+                 fill="green", 
+                 alpha = .2)+
+                 labs(title="Histogram of Weights of Cans") +
+                 labs(x="Line 1", y="Count") 
+
+H2 <- ggplot(data=P, aes(Line_2)) + geom_histogram(breaks=seq(10, 20, by = 1), 
+                 col="red", 
+                 fill="blue", 
+                 alpha = .2)+
+                 labs(title="Histogram of Weights of Cans") +
+                 labs(x="Line 2", y="Count") 
+library(gridExtra)
+grid.arrange(B1,B2,H1,H2,ncol=2, top="Box Plots and Histograms of Weights of Cans\nfrom the 2 production lines")
+```
+
+```{r}
+#1(b) Basis stats and 2-sample t-test 
+summary(P)
+#1-sample t-tests
+#Test if the mean weights mu1 and mu2 are = 16 oz or not
+#Test H0: Mu = 16, vs H1: Mu is not = 16
+#Run 1-sample t test on both samples, Line1 and Line2
+```
+
+```{r 1_sample_t_tests}
+#1(b)
+t.test(P$Line_1,mu=16)
+t.test(P$Line_2,mu=16)
+```
+
+```{r 2_sample_t_test_with_normality_tests}
+#1(c)
+t.test(P$Line_1,P$Line_2,var.equal=FALSE)
+
+#1(d)
+q1 <- ggplot(P)+stat_qq(aes(sample=Line_1)) + 
+  geom_qq_line(aes(sample=Line_1))+ggtitle("Normal Q-Q Plot, Line 1")+
+  geom_text(aes(x=0, y=12.5, color="red", label="Shapiro-test p-value = 0.4572"))+
+  theme(legend.position="none")
+
+
+q2 <- ggplot(P)+stat_qq(aes(sample=Line_2)) + 
+  geom_qq_line(aes(sample=Line_2))+ggtitle("Normal Q-Q Plot, Line 2")+
+  geom_text(aes(x=0, y=12.5, color="red", label="Shapiro-test p-value = 0.9524"))+
+  theme(legend.position="none")
+
+grid.arrange(q1,q2,nrow=2, top="Normal Q-Q Plots of can weight for 2 production lines")
+
+shapiro.test(P$Line_1) # W = 0.96207, p-value = 0.4572
+shapiro.test(P$Line_2) # W = 0.98409, p-value = 0.9524
+```
+
+```{r 2_proportions_test}
+#1(e)Test of Proportions
+#proportions of cans with weight < 17
+n <- nrow(P)              # 25
+x1 <- sum(P$Line_1 < 17)  # 19
+x2 <- sum(P$Line_2 < 17)  # 21
+
+prop.test(c(x1,x2),c(n,n),correct=FALSE)  # p-value = 0.4795
+prop.test(c(x1,x2),c(n,n),correct=TRUE) # apply continuity correction
+``` 
+
+```{r histograms_with_normal_curves}
+#2(g) verification of normality of samples
+h1 <- ggplot(P, aes(x = Line_1)) + 
+    geom_histogram(aes(y =..density..),
+                   breaks = seq(10, 20, by = 0.5), 
+                   colour = "blue", 
+                   fill = "lightblue") +
+stat_function(fun = dnorm, color = "red", args = list(mean=mean(P$Line_1),sd=sd(P$Line_1)))
+
+h2 <- ggplot(P, aes(x = Line_2)) + 
+    geom_histogram(aes(y =..density..),
+                   breaks = seq(10, 20, by = 0.5), 
+                   colour = "blue", 
+                   fill = "orange") +
+stat_function(fun = dnorm, color = "red", args = list(mean=mean(P$Line_2),sd=sd(P$Line_2)))
+
+grid.arrange(h1,h2,ncol=2, top="Histograms of can weight for 2 production lines")
+```
+                  

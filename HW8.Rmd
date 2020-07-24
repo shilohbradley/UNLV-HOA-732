@@ -1,0 +1,273 @@
+---
+title: "Homework 8 - Random Forests"
+author: "Shiloh Bradley"
+date: "6/24/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+source("PRF1.R")
+
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+```
+
+# Charles Book Club
+```{r read data CBC}
+df <- read.csv("Charles_BookClub.csv", header = TRUE)
+dim(df)  ## 2000 18
+head(df)
+tail(df)
+```
+
+```{r split dataset into training and test sets CBC}
+p <- 0.25
+M <- p * nrow(df)
+#set initial seed for repeatability 
+set.seed(113117)
+
+holdout <- sample(1:nrow(df), M, replace = F)
+df.train <- df[-holdout, ]
+df.test  <- df[holdout, ]
+
+dim(df.train) ## 1500 18
+dim(df.test)  ## 500 18
+```
+
+```{r default Full RF model CBC}
+features <- setdiff(names(df.train), "Florence")
+rf1 <- randomForest(factor(Florence) ~ ., data = df.train)
+rf1
+CM.rf_train <- rf1$confusion
+CM.rf_train
+OA.rf_train <- sum(diag(CM.rf_train))/sum(CM.rf_train)
+```
+
+Tuning Random Forests - only a few parameters 
+
+ntree: number of trees. We want enough trees to stabalize the error but using too many trees is unncessarily inefficient, especially when using large data sets.
+mtry: # of variables to randomly sample at each split. 
+mtry = start with 5 values evenly spaced across the range from 2 to p, # of predictors
+
+sampsize: the number of samples to train on. 
+default = 63.25% average # of unique observations in a bootstrap sample. 
+Lower sampsize reduces the training time but may increase bias 
+High sampsize can increase accuracy but may end up overfitting
+sampsize between 60-80% range seems to work best
+
+nodesize: minimum number of samples within the terminal nodes
+nodesize small -> deeper and more complex trees
+nodesize large -> shallow trees, less accuracy
+
+maxnodes: maximum number of terminal nodes. 
+high maxnodes -> deep, more complex trees
+```{r simple tuning of random forest CBC}
+set.seed(7231)
+rf2 <- tuneRF(
+  x          = df.train[features],
+  y          = factor(df.train$Florence),
+  ntreeTry   = 500,
+  mtryStart  = 2,
+  stepFactor = 2,
+  improve    = 0.01,
+  trace      = FALSE      # to not show real-time progress 
+)
+```
+
+```{r optimal RF model CBC}
+set.seed(11713)
+rf2 <- randomForest(factor(Florence) ~ ., mtry = 4, ntree = 500, importance = TRUE, data = df.train)
+rf2
+CM.rf_train <- rf2$confusion
+CM.rf_train
+OA.rf_train <- sum(diag(CM.rf_train))/sum(CM.rf_train)
+```
+
+```{r variable importance CBC}
+VI.FL <- as.data.frame(rf2$importance)
+names(VI.FL)
+
+VIFL.sort <- VI.FL %>% arrange(MeanDecreaseGini)
+# write.csv(VIFL.sort, "VIFL 120118.csv")
+VIFL.sort$X <- rownames(VIFL.sort)
+VIFL.sort$X <- factor(VIFL.sort$X, levels = VIFL.sort$X)
+
+p.FL <- ggplot(VIFL.sort, aes(x = X, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "lightblue", color = "darkblue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("Mean Decrease in Gini Index") + 
+  xlab("Predictor") +
+  ggtitle("Variable Importance Plot of Full RF Model: CBC Data")
+
+p.FL 
+```
+
+```{r reduced RF model CBC}
+set.seed(11713)
+rf3 <- randomForest(factor(Florence) ~ . , mtry = 4, ntree = 500, data = df.train)
+rf3
+CM.rf_train <- rf3$confusion
+CM.rf_train
+OA.rf_train <- sum(diag(CM.rf_train))/sum(CM.rf_train)
+OA.rf_train
+```
+
+```{r variable importance final RF model CBC}
+VI.FL <- as.data.frame(rf3$importance)
+names(VI.FL)
+
+VIFL.sort <- VI.FL %>% arrange(MeanDecreaseGini)
+# write.csv(VIFL.sort,"VIFL 120118.csv")
+VIFL.sort$X <- rownames(VIFL.sort)
+VIFL.sort$X <- factor(VIFL.sort$X, levels = VIFL.sort$X)
+
+p.FL <- ggplot(VIFL.sort, aes(x = X, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "lightblue", color = "darkblue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("Mean Decrease in Gini Index") + 
+  xlab("Predictor") +
+  ggtitle("Variable Importance Plot of Full RF Model: CBC Data")
+
+p.FL
+```
+
+```{r}
+prf1_train <- PRF1(CM.rf_train)
+prf1_train
+```
+
+```{r predict test set CBC}
+pred.test <- predict(rf3, df.test)
+pred.test <- as.numeric(levels(pred.test)[pred.test])
+CM.test <- table(df.test$Florence,round(pred.test))
+CM.test
+```
+
+```{r}
+prf1_test <- PRF1(CM.test)
+prf1_test
+```
+
+# Titanic
+```{r read Titanic data}
+df <- read.csv("titanic3.csv", header = TRUE) %>%
+  select(survived, pclass, sex, age, sibsp, parch) %>%
+  filter(!is.na(pclass) & !is.na(sex) & !is.na(age) & !is.na(sibsp) & !is.na(parch)) %>%
+  mutate(survived = as.numeric(survived))
+dim(df)  ## 1309 14
+head(df)
+tail(df)
+```
+
+```{r split Titanic dataset into training and test sets}
+p <- 0.25
+M <- p * nrow(df)
+#set initial seed for repeatability 
+set.seed(113117)
+
+holdout <- sample(1:nrow(df), M, replace = F)
+df.train <- df[-holdout, ]
+df.test  <- df[holdout, ]
+
+dim(df.train) ## 785 6
+dim(df.test)  ## 261 6
+```
+
+```{r default Full RF model of Titanic Data}
+features <- setdiff(names(df.train), "survived")
+rf1 <- randomForest(factor(survived) ~ ., data = df.train)
+rf1
+CM.rf_train <- rf1$confusion
+CM.rf_train
+OA.rf_train <- sum(diag(CM.rf_train))/sum(CM.rf_train)
+```
+
+```{r simple tuning of random forest for Titanic data}
+set.seed(7231)
+rf2 <- tuneRF(
+  x          = df.train[features],
+  y          = factor(df.train$survived),
+  ntreeTry   = 500,
+  mtryStart  = 2,
+  stepFactor = 2,
+  improve    = 0.01,
+  trace      = FALSE      # to not show real-time progress 
+)
+```
+
+```{r optimal RF model of Titanic data}
+set.seed(11713)
+rf2 <- randomForest(factor(survived) ~ ., mtry = 4, ntree = 500, importance = TRUE, data = df.train)
+rf2
+CM.rf_train <- rf2$confusion
+CM.rf_train
+OA.rf_train <- sum(diag(CM.rf_train))/sum(CM.rf_train)
+```
+
+```{r variable importance Titanic}
+VI.FL <- as.data.frame(rf2$importance)
+names(VI.FL)
+
+VIFL.sort <- VI.FL %>% arrange(MeanDecreaseGini)
+# write.csv(VIFL.sort, "VIFL 120118.csv")
+VIFL.sort$X <- rownames(VIFL.sort)
+VIFL.sort$X <- factor(VIFL.sort$X, levels = VIFL.sort$X)
+
+p.FL <- ggplot(VIFL.sort, aes(x = X, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "lightblue", color = "darkblue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("Mean Decrease in Gini Index") + 
+  xlab("Predictor") +
+  ggtitle("Variable Importance Plot of Full RF Model: Titanic Data")
+
+p.FL 
+```
+
+```{r reduced RF model Titanic}
+set.seed(11713)
+rf3 <- randomForest(factor(survived) ~ . , mtry = 4, ntree = 500, data = df.train)
+rf3
+CM.rf_train <- rf3$confusion
+CM.rf_train
+OA.rf_train <- sum(diag(CM.rf_train))/sum(CM.rf_train)
+OA.rf_train
+```
+
+```{r variable importance final RF model Titanic}
+VI.FL <- as.data.frame(rf3$importance)
+names(VI.FL)
+
+VIFL.sort <- VI.FL %>% arrange(MeanDecreaseGini)
+# write.csv(VIFL.sort,"VIFL 120118.csv")
+VIFL.sort$X <- rownames(VIFL.sort)
+VIFL.sort$X <- factor(VIFL.sort$X, levels = VIFL.sort$X)
+
+p.FL <- ggplot(VIFL.sort, aes(x = X, y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "lightblue", color = "darkblue") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ylab("Mean Decrease in Gini Index") + 
+  xlab("Predictor") +
+  ggtitle("Variable Importance Plot of Full RF Model: Titanic Data")
+
+p.FL
+```
+
+```{r}
+prf1_train <- PRF1(CM.rf_train)
+prf1_train
+```
+
+```{r predict test set Titanic}
+pred.test <- predict(rf3, df.test)
+pred.test <- as.numeric(levels(pred.test)[pred.test])
+CM.test <- table(df.test$survived, round(pred.test))
+CM.test
+```
+
+```{r}
+prf1_test <- PRF1(CM.test)
+prf1_test
+```

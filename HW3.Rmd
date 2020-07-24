@@ -1,0 +1,72 @@
+---
+title: "HW3 - ANOVA"
+author: "Shiloh Bradley"
+date: "6/10/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+
+setwd("~/Desktop/Personal Computer/MBA/HOA 732/")
+```
+
+```{r Problem 3: Test if the average sales are equal for three promotions} 
+S <- read.csv("restaurant4anova.csv",header=TRUE)
+head(S)
+tail(S)
+```
+These box plots show us that promo 3 is the best. No promotion is the worst. There is an overlap between these three though. We wil lse 
+```{r Step 1 Box Plot of Sales by Promo}
+BX2 <- ggplot(S,aes(x=factor(Promo),y=Sales)) + geom_boxplot()+
+       stat_summary(fun = "mean", geom="point",color="red")
+BX2 + xlab("Promotion")
+```
+
+```{r}
+p.dot <- ggplot(S,aes(x=factor(Promo),y=Sales)) + 
+  geom_dotplot(binaxis='y', stackdir='center')
+p.dot + xlab("Promotion")
+```
+
+```{r}
+#xbari.	65.19592	76.84204	77.82536	99.882
+#xbar..	82.53757882
+S$Promo <- factor(S$Promo)
+p.dot <- ggplot(S,aes(x=Promo,y=Sales,fill=Promo)) + 
+  geom_dotplot(binaxis='y', stackdir='center') +
+  geom_hline(yintercept = c(65.19592,76.84204,77.82536,99.882), color=c("red","green","cyan  ","purple"))+
+  geom_hline(yintercept = 82.54)
+p.dot 
+```
+
+```{r Descriptive stats}
+# summary stats
+xbar <- tapply(S$Sales, S$Promo, mean)
+SD <- tapply(S$Sales, S$Promo, sd)
+round(xbar,2)
+round(SD,2)
+```
+Sales is the response variable. Promo is a categorical predictor of Sales.
+```{r use 1-way ANOVA to compare mean sales of 3 promos}
+a1 <- aov(data=S,Sales~factor(Promo))
+summary(a1) ## Shows us the ANOVA table
+names(a1)
+``` 
+
+Since P-Value is less than .05, we reject H0 and conclude that not all means are equal.
+Q-Q plot shows that: residuals plot along the normal line, suggesting residuals are normal.
+In addition, P-value of Shapiro-Wilks' normality test is > 0.05, so normality is verified. This makes the P-value from F-test accurate. 
+```{r normality test for residuals from ANOVA}
+#qq plot with normal line (normality test)
+df <- as.data.frame(a1$residuals)
+colnames(df)[1] <- "residuals"
+
+shapiro.test(df$residuals) # W = 0.97087, p-value = 0.05123
+
+ggplot(df)+stat_qq(aes(sample=residuals)) + 
+  geom_qq_line(aes(sample=residuals))+
+  geom_text(aes(x=0.5, y=-20, label="Shapiro-test p-value = 0.05123"))
+```
